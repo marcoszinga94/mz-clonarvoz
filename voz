@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Wrapper: ejecuta voz.py con el Python del entorno virtual (torch CPU).
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
+[[ -x .venv/bin/python ]] || { echo "Falta el entorno. Corre: ./setup.sh"; exit 1; }
+exec .venv/bin/python voz.py "$@"

@@ -1,0 +1,17 @@
+# Motor TTS (MIT). Arrastra torch/torchaudio CPU y transformers.
+chatterbox-tts==0.1.7
+
+# perth (marca de agua) importa pkg_resources, eliminado en setuptools>=81
+setuptools<81
+
+# Utilidades
+numpy
+soundfile
+
+# App visual
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Transcripción (Whisper base en CPU)
+faster-whisper

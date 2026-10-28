@@ -1,0 +1,9 @@
+.venv/
+refs/*.wav
+refs/*.mp3
+salida/
+__pycache__/
+*.pyc
+
+# checkpoints enlazados a la caché de HF
+models/
