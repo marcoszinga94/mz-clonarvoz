@@ -352,7 +352,7 @@ def generar(body: dict) -> dict:
         "ref": body.get("ref"),
         "lang": body.get("lang", "es"),
         "variante": body.get("variante", "neutro"),
-        "exag": float(body.get("exag", 0.5)),
+        "exag": float(body.get("exag", 0.4)),
         "cfg": float(body.get("cfg", 0.5)),
         "seed": int(body.get("seed", 42)),
         "lufs": float(body.get("lufs", -14)),

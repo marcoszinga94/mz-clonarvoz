@@ -882,7 +882,7 @@ def main() -> None:
     ss.add_argument("-o", "--output", default=str(SALIDA / "clip.mp3"))
     ss.add_argument("--voice", default=str(DEFAULT_REF), help="clip de referencia")
     ss.add_argument("--lang", default="es")
-    ss.add_argument("--exag", type=float, default=0.5, help="expresividad 0–1 (def. 0.5)")
+    ss.add_argument("--exag", type=float, default=0.4, help="expresividad 0–1 (def. 0.4)")
     ss.add_argument("--cfg", type=float, default=0.5, help="apego al texto 0–1 (def. 0.5)")
     ss.add_argument("--seed", type=int, default=42)
     ss.add_argument("--pausa-frase", type=int, default=180, metavar="MS",
@@ -909,7 +909,7 @@ def main() -> None:
     sb.add_argument("--outdir", default=str(SALIDA))
     sb.add_argument("--voice", default=str(DEFAULT_REF))
     sb.add_argument("--lang", default="es")
-    sb.add_argument("--exag", type=float, default=0.5)
+    sb.add_argument("--exag", type=float, default=0.4)
     sb.add_argument("--cfg", type=float, default=0.5)
     sb.add_argument("--seed", type=int, default=42)
     sb.add_argument("--pausa-frase", type=int, default=180, metavar="MS")

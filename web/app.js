@@ -639,7 +639,7 @@ conectarChips("#gobj", "objetivo", false);
 conectarChips("#gseg", "segundos", true);
 
 $("#btn-reset").addEventListener("click", () => {
-  $("#exag").value = 0.5; $("#exag-val").textContent = "0.50";
+  $("#exag").value = 0.4; $("#exag-val").textContent = "0.40";
   $("#cfg").value = 0.5; $("#cfg-val").textContent = "0.50";
   $("#seed").value = 42; $("#lang").value = "es";
   $("#pausa-frase").value = 180; $("#pausa-coma").value = 90; $("#pausa-parrafo").value = 300;
