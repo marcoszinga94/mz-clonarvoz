@@ -85,10 +85,19 @@ function pintarMotor(e) {
   $("#btn-generar").title = e.motor === "listo" ? "" : "El modelo todavía se está cargando";
 }
 
+let _refsFirma = "";
+
 function pintarRefs(refs) {
+  estado.refs = refs;
+
+  // El estado se refresca cada 15 s: si nada cambió, no se toca el DOM ni el
+  // reproductor (reasignar `src` corta la reproducción en curso).
+  const firma = refs.map((r) => [r.nombre, r.dur, r.mtime, r.exag ?? ""].join("|")).join(",");
+  if (firma === _refsFirma) return;
+  _refsFirma = firma;
+
   const sel = $("#select-voz");
   const antes = sel.value;
-  estado.refs = refs;
   sel.innerHTML = "";
   if (!refs.length) {
     sel.append(new Option("Sin referencia (voz por defecto)", ""));
@@ -115,7 +124,10 @@ function pintarRefAudio() {
     return;
   }
   audio.hidden = false;
-  audio.src = ref.url;
+  // `?v=` fuerza recarga cuando se regraba con el mismo nombre, y evita
+  // recargar (y cortar) el audio cuando el archivo no cambió.
+  const url = new URL(`${ref.url}?v=${Math.round(ref.mtime || 0)}`, location.href).href;
+  if (audio.src !== url) audio.src = url;
   $("#ref-dur").textContent = fmt(ref.dur);
   $("#btn-calibrar").hidden = false;
   pintarAnalisis(ref.analisis);

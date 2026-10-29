@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import guiones
@@ -407,9 +407,29 @@ threading.Thread(target=_worker_tx, daemon=True).start()
 app = FastAPI(title="ClonarVoz", docs_url=None, redoc_url=None)
 
 
+@app.middleware("http")
+async def sin_cache_ui(request, call_next):
+    """La UI se revalida siempre: si no, un cambio de JS queda cacheado."""
+    respuesta = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/web/"):
+        respuesta.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return respuesta
+
+
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(WEB / "index.html")
+def index() -> HTMLResponse:
+    """Sirve la UI con la versión de JS/CSS atada al mtime del archivo.
+
+    Sin esto el navegador puede seguir usando un app.js viejo después de un
+    cambio (StaticFiles no manda Cache-Control y la caché heurística gana).
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    for nombre in ("app.js", "style.css"):
+        archivo = WEB / nombre
+        if archivo.exists():
+            html = html.replace(f"/web/{nombre}",
+                                f"/web/{nombre}?v={int(archivo.stat().st_mtime)}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/config")
