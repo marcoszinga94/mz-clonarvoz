@@ -42,6 +42,10 @@ TOMAS = 3  # cuántas grabaciones se conservan por nombre
 ESTADO = {"motor": "cargando", "detalle": "cargando el modelo", "error": None}
 TRABAJOS: dict[str, dict] = {}
 COLA: queue.Queue[str] = queue.Queue()
+COLA_LOCK = threading.Lock()
+ESTADO_DIR = ROOT / ".estado"
+ESTADO_DIR.mkdir(exist_ok=True)
+COLA_FILE = ESTADO_DIR / "cola.json"
 COLA_TX: queue.Queue[str] = queue.Queue()
 _DUR_CACHE: dict[str, tuple[float, float]] = {}
 
@@ -174,6 +178,43 @@ def obtener_motor(variante: str):
     while len(MOTORES) > 2:
         MOTORES.popitem(last=False)
     return motor
+
+
+def guardar_cola() -> None:
+    """Guarda los trabajos pendientes para sobrevivir a un reinicio."""
+    with COLA_LOCK:
+        activos = []
+        for j in list(TRABAJOS.values()):
+            if j.get("estado") not in ("en_cola", "generando"):
+                continue
+            if j.get("tipo") == "transcripcion" or j.get("cancelar"):
+                continue  # temporal en /tmp o ya cancelado
+            activos.append({k: v for k, v in j.items()
+                            if k not in ("ruta", "parciales", "resultados")})
+        tmp = COLA_FILE.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(activos, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(COLA_FILE)
+        except OSError:
+            pass
+
+
+def cargar_cola() -> None:
+    if not COLA_FILE.exists():
+        return
+    try:
+        datos = json.loads(COLA_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for d in datos:
+        jid = d.get("id")
+        if not jid or jid in TRABAJOS:
+            continue
+        d.update(estado="en_cola", detalle="reanudado tras reinicio", progreso=0.0,
+                 parciales=[], resultados=[], cancelar=False, error=None)
+        d.setdefault("creado", time.time())
+        TRABAJOS[jid] = d
+        COLA.put(jid)
 
 
 def _procesar(job: dict) -> None:
@@ -324,6 +365,7 @@ def _worker() -> None:
         finally:
             job["segundos"] = round(time.time() - t0, 1)
             job["fin"] = time.time()
+            guardar_cola()
 
 
 def _worker_tx() -> None:
@@ -353,6 +395,7 @@ def _worker_tx() -> None:
             ruta.unlink(missing_ok=True)
 
 
+cargar_cola()
 threading.Thread(target=_worker, daemon=True).start()
 threading.Thread(target=_worker_tx, daemon=True).start()
 
@@ -459,6 +502,7 @@ def calibrar_ref(body: dict) -> dict:
         "cancelar": False, "error": None, "creado": time.time(),
     }
     COLA.put(jid)
+    guardar_cola()
     return {"job": jid}
 
 
@@ -518,6 +562,7 @@ def generar(body: dict) -> dict:
         "creado": time.time(),
     }
     COLA.put(jid)
+    guardar_cola()
     return {"job": jid, "estado": "en_cola"}
 
 
@@ -555,6 +600,7 @@ def cancelar(jid: str) -> dict:
         # Todavía no arrancó: se marca cancelado ya, sin esperar al worker.
         j["estado"] = "cancelado"
         j["detalle"] = "cancelado antes de empezar"
+    guardar_cola()
     return {"ok": True, "estado": j["estado"]}
 
 

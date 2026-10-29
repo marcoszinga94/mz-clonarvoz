@@ -12,3 +12,6 @@ models/
 *.log
 *.err
 refs/*.json
+
+# estado de la cola
+.estado/

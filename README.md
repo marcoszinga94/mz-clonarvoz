@@ -68,7 +68,8 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
   trozo. Si querés que la coma también sea un punto de corte, activá
   *Cortar en cada coma*.
 - **Cola**: una generación a la vez (la CPU manda), con progreso por frase y
-  resultados que aparecen a medida que terminan.
+  resultados que aparecen a medida que terminan. Los trabajos pendientes se
+  guardan en `.estado/cola.json` y se reanudan si reinicias el servidor.
 - **En vivo**: cada frase se publica apenas se sintetiza y se reproduce en
   streaming, antes de terminar el clip. Si no convence, **Cancelar** descarta
   todo y no guarda nada (corta al terminar la frase en curso, ~15 s).
