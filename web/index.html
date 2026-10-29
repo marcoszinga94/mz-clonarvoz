@@ -79,6 +79,44 @@
           <input id="seed" class="input input-sm" type="number" value="42" min="0" step="1">
         </div>
       </div>
+
+      <div class="campo-2">
+        <div class="campo">
+          <div class="campo-h"><label for="pausa-frase">Pausa de frase</label><span class="mono">ms</span></div>
+          <input id="pausa-frase" class="input input-sm" type="number" value="180" min="0" max="3000" step="10">
+        </div>
+        <div class="campo">
+          <div class="campo-h"><label for="pausa-coma">Pausa de coma</label><span class="mono">ms</span></div>
+          <input id="pausa-coma" class="input input-sm" type="number" value="90" min="0" max="3000" step="10">
+        </div>
+      </div>
+
+      <div class="campo">
+        <div class="campo-h"><label for="pausa-parrafo">Pausa de párrafo</label><span class="mono">ms</span></div>
+        <input id="pausa-parrafo" class="input input-sm" type="number" value="300" min="0" max="3000" step="10">
+        <p class="pista">Solo aplica si el texto tiene líneas en blanco.</p>
+      </div>
+
+      <div class="campo">
+        <div class="campo-h"><label for="silencio-max">Silencio máximo</label><span class="mono">ms</span></div>
+        <input id="silencio-max" class="input input-sm" type="number" value="350" min="0" max="3000" step="10">
+        <p class="pista">Acorta las pausas que inventa el modelo. 0 = no tocar.</p>
+      </div>
+
+      <label class="check" for="cortar-comas">
+        <input type="checkbox" id="cortar-comas">
+        <span>Cortar en cada coma (controla esa pausa)</span>
+      </label>
+
+      <div class="campo">
+        <label for="recorte">Silencio del modelo</label>
+        <select id="recorte" class="select-sm">
+          <option value="1" selected>Recortar (recomendado)</option>
+          <option value="0">Dejar el que agrega</option>
+        </select>
+        <p class="pista">Recortarlo hace que la pausa sea exactamente la de arriba.</p>
+      </div>
+
       <p class="pista" id="pack-nota" hidden></p>
     </section>
   </aside>
@@ -109,6 +147,17 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
         </button>
       </div>
       <p class="error" id="error-guion" hidden role="alert"></p>
+    </section>
+
+    <section class="card cola-card" id="cola-card" hidden aria-live="polite">
+      <div class="card-h">
+        <h2>Cola de generación</h2>
+        <div class="cola-h-acc">
+          <span class="hint mono" id="cola-resumen"></span>
+          <button class="link" id="btn-limpiar-cola" type="button" hidden>Limpiar</button>
+        </div>
+      </div>
+      <div class="cola" id="cola"></div>
     </section>
 
     <section class="card card-trabajo" id="trabajo" hidden aria-live="polite">

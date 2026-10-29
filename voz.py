@@ -164,6 +164,21 @@ VARIANTES = {
 }
 
 
+BASE = ROOT / "models" / "cb-base"
+FICHEROS_BASE = (
+    "ve.pt",
+    "t3_mtl23ls_v2.safetensors",
+    "s3gen.pt",
+    "grapheme_mtl_merged_expanded_v1.json",
+    "conds.pt",
+)
+
+
+def base_listo() -> bool:
+    """True si los pesos del modelo base están descargados en models/cb-base."""
+    return all((BASE / f).exists() for f in FICHEROS_BASE)
+
+
 def pack_listo(clave: str) -> bool:
     d = ROOT / "models" / f"cb-{clave}"
     return (d / "t3_mtl23ls_v2.safetensors").exists() and (d / "s3gen.pt").exists()
@@ -211,6 +226,10 @@ def regionalizar(texto: str, variante: str = "neutro") -> str:
 
 def _dir_pack(clave: str) -> Path:
     """Arma un checkpoint cargable mezclando el pack con los assets compartidos."""
+    destino = ROOT / "models" / f"cb-{clave}"
+    if pack_listo(clave):
+        return destino  # ya está en disco: no consulta el Hub
+
     from huggingface_hub import snapshot_download
 
     repo, t3 = PACKS[clave]
@@ -219,7 +238,6 @@ def _dir_pack(clave: str) -> Path:
     pack = Path(snapshot_download(repo, allow_patterns=[
         t3, "s3gen_v3.pt", "grapheme_mtl_merged_expanded_v1.json"]))
 
-    destino = ROOT / "models" / f"cb-{clave}"
     destino.mkdir(parents=True, exist_ok=True)
     enlaces = {
         "ve.pt": base / "ve.pt",
@@ -231,8 +249,53 @@ def _dir_pack(clave: str) -> Path:
     for nombre, origen in enlaces.items():
         enlace = destino / nombre
         if not enlace.exists():
-            enlace.symlink_to(origen.resolve())
+            try:
+                enlace.symlink_to(origen.resolve())
+            except (OSError, NotImplementedError):
+                # Windows sin privilegios no permite symlinks: se copia el archivo.
+                shutil.copy2(origen, enlace)
     return destino
+
+
+def _cargar_local(directorio: Path):
+    """Carga un checkpoint en disco sin tocar la red.
+
+    Dos tolerancias necesarias con los packs de español:
+    - `s3gen_v3.pt` no trae `tokenizer._mel_filters` ni `tokenizer.window`: son
+      buffers que se recalculan al construir el módulo (el modelo los declara
+      en `ignore_state_dict_missing`). Solo se relaja la carga si lo que falta
+      es exactamente eso; cualquier otra diferencia sigue siendo error.
+    - El tokenizer chino pide `Cangjie5_TC.json` por red con `cache_dir`; si el
+      archivo ya está en la carpeta del modelo, se usa ese y no se consulta el Hub.
+    """
+    directorio = Path(directorio)
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    from chatterbox.models.s3gen.s3gen import S3Token2Wav
+    from chatterbox.models.tokenizers import tokenizer as tok
+
+    guardar_sd = S3Token2Wav.load_state_dict
+    guardar_dl = tok.hf_hub_download
+
+    def tolerante(self, state_dict, strict=True, assign=False):
+        faltan = {k for k in self.state_dict() if k not in state_dict}
+        permitidas = set(getattr(self, "ignore_state_dict_missing", ()))
+        if faltan and faltan <= permitidas:
+            return guardar_sd(self, state_dict, strict=False, assign=assign)
+        return guardar_sd(self, state_dict, strict=strict, assign=assign)
+
+    def local(repo_id, filename, **kw):
+        ruta = directorio / filename
+        if ruta.exists():
+            return str(ruta)
+        return guardar_dl(repo_id, filename, **kw)
+
+    S3Token2Wav.load_state_dict = tolerante
+    tok.hf_hub_download = local
+    try:
+        return ChatterboxMultilingualTTS.from_local(directorio, "cpu")
+    finally:
+        S3Token2Wav.load_state_dict = guardar_sd
+        tok.hf_hub_download = guardar_dl
 
 
 class Motor:
@@ -248,7 +311,11 @@ class Motor:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
         pack = VARIANTES.get(variante)
         if pack and pack_listo(pack):
-            self.model = ChatterboxMultilingualTTS.from_local(_dir_pack(pack), "cpu")
+            # El pack ya está en models/cb-<pack>: se carga del disco, sin red.
+            self.model = _cargar_local(ROOT / "models" / f"cb-{pack}")
+        elif base_listo():
+            # Pesos ya descargados en models/cb-base: no consulta el Hub.
+            self.model = _cargar_local(BASE)
         else:
             if pack:
                 print(f"[motor] pack {pack} no instalado: uso el modelo base "
@@ -281,41 +348,163 @@ class Motor:
         return wav.squeeze(0)
 
 
-def partir_frases(texto: str, max_chars: int = 180) -> list[str]:
-    """Corta por frases y luego por comas para no exceder el contexto del modelo."""
-    texto = re.sub(r"\s+", " ", texto).strip()
-    trozos: list[str] = []
-    for parrafo in re.split(r"(?<=[.!?…])\s+", texto):
-        if len(parrafo) <= max_chars:
-            trozos.append(parrafo)
-            continue
-        buf = ""
-        for parte in re.split(r"(?<=[,;:])\s+", parrafo):
-            if len(buf) + len(parte) <= max_chars:
-                buf = f"{buf} {parte}".strip()
+# Pausas entre trozos, en segundos. Configurables desde la UI o la CLI.
+#   frase   → después de . ! ? …
+#   coma    → después de , ; : (cuando el texto se corta ahí)
+#   parrafo → entre párrafos (línea en blanco)
+PAUSAS = {"frase": 0.18, "coma": 0.09, "parrafo": 0.30}
+
+
+def normalizar_pausas(pausas: dict | None) -> dict:
+    """Mezcla lo pedido con los valores por defecto y lo mantiene en rango."""
+    salida = dict(PAUSAS)
+    for clave, valor in (pausas or {}).items():
+        if clave in salida and valor is not None:
+            salida[clave] = max(0.0, min(float(valor), 3.0))
+    return salida
+
+
+def pausas_de(a: argparse.Namespace) -> dict:
+    """Pausas desde la CLI, que las recibe en milisegundos."""
+    return {
+        "frase": (a.pausa_frase or 0) / 1000,
+        "coma": (a.pausa_coma or 0) / 1000,
+        "parrafo": (a.pausa_parrafo or 0) / 1000,
+    }
+
+
+def recortar_silencio(wav, sr: int, umbral_db: float = -45.0, margen_ms: int = 30):
+    """Saca el silencio que el modelo agrega al principio y al final de un trozo.
+
+    Sin esto la pausa real es `pausa + cola del modelo` (0,2–0,5 s variable),
+    que es justo lo que hace que los puntos suenen eternos.
+    """
+    import torch
+
+    umbral = 10 ** (umbral_db / 20)
+    activo = wav.abs() > umbral
+    if not bool(activo.any()):
+        return wav
+    idx = torch.nonzero(activo).flatten()
+    margen = int(margen_ms / 1000 * sr)
+    ini = max(0, int(idx[0]) - margen)
+    fin = min(wav.shape[-1], int(idx[-1]) + margen + 1)
+    return wav[ini:fin]
+
+
+def comprimir_silencios(wav, sr: int, max_ms: int = 350, umbral_db: float = -40.0):
+    """Acorta a `max_ms` los silencios internos más largos que eso.
+
+    El modelo a veces estira las pausas de coma o de punto muy por encima de lo
+    natural; esto las deja en un máximo predecible sin tocar el habla.
+    """
+    import numpy as np
+    import torch
+
+    if max_ms <= 0 or wav.numel() == 0:
+        return wav
+
+    umbral = 10 ** (umbral_db / 20)
+    x = wav.detach().cpu().numpy()
+    silencio = np.abs(x) <= umbral
+    if not silencio.any() or silencio.all():
+        return wav
+
+    cambios = np.diff(silencio.astype(np.int8))
+    inicios = list(np.where(cambios == 1)[0] + 1)
+    fines = list(np.where(cambios == -1)[0] + 1)
+    if silencio[0]:
+        inicios.insert(0, 0)
+    if silencio[-1]:
+        fines.append(len(x))
+
+    maximo = int(max_ms / 1000 * sr)
+    partes, previo = [], 0
+    for ini, fin in zip(inicios, fines):
+        if ini > 0:  # solo internos: los bordes los maneja recortar_silencio
+            partes.append(x[previo:ini])
+            partes.append(x[ini:min(fin, ini + maximo)])
+            previo = fin
+    partes.append(x[previo:])
+
+    if len(partes) == 1:
+        return wav
+    return torch.from_numpy(np.concatenate(partes)).to(wav.dtype)
+
+
+def partir_trozos(texto: str, max_chars: int = 180,
+                  cortar_comas: bool = False) -> list[tuple[str, str]]:
+    """Parte el texto y marca qué pausa va después de cada trozo.
+
+    Devuelve (texto, nivel) con nivel en 'frase' | 'coma' | 'parrafo'.
+    Sin `cortar_comas` la coma solo corta cuando el trozo supera `max_chars`
+    (límite de contexto del modelo); con `cortar_comas` cada coma es un corte.
+    """
+    trozos: list[tuple[str, str]] = []
+
+    parrafos = [re.sub(r"\s+", " ", p).strip() for p in re.split(r"\n\s*\n+", texto.strip())]
+    parrafos = [p for p in parrafos if p]
+
+    for pi, parrafo in enumerate(parrafos):
+        frases = [f.strip() for f in re.split(r"(?<=[.!?…])\s+", parrafo) if f.strip()]
+        for fi, frase in enumerate(frases):
+            ultima_frase = fi == len(frases) - 1
+            # la última frase de un párrafo que no es el último lleva pausa de párrafo
+            cierre = "parrafo" if ultima_frase and pi < len(parrafos) - 1 else "frase"
+
+            if len(frase) <= max_chars and not cortar_comas:
+                trozos.append((frase, cierre))
+                continue
+
+            partes: list[str] = []
+            if cortar_comas:
+                partes = [p.strip() for p in re.split(r"(?<=[,;:])\s+", frase) if p.strip()]
             else:
+                buf = ""
+                for parte in re.split(r"(?<=[,;:])\s+", frase):
+                    if len(buf) + len(parte) <= max_chars:
+                        buf = f"{buf} {parte}".strip()
+                    else:
+                        if buf:
+                            partes.append(buf)
+                        buf = parte
                 if buf:
-                    trozos.append(buf)
-                buf = parte
-        if buf:
-            trozos.append(buf)
-    return [t for t in trozos if t]
+                    partes.append(buf)
+
+            for k, parte in enumerate(partes):
+                ultima = k == len(partes) - 1
+                trozos.append((parte, cierre if ultima else "coma"))
+
+    return [(t, n) for t, n in trozos if t]
+
+
+def partir_frases(texto: str, max_chars: int = 180) -> list[str]:
+    """Solo los textos de `partir_trozos` (compatibilidad)."""
+    return [t for t, _ in partir_trozos(texto, max_chars)]
 
 
 def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                exag: float, cfg: float, seed: int, progreso=None,
-               variante: str = "neutro") -> tuple["object", list[str], list[float]]:
-    """Genera por frases y concatena. Devuelve (wav, frases, duraciones)."""
+               variante: str = "neutro", pausas: dict | None = None,
+               cortar_comas: bool = False,
+               recortar: bool = True,
+               silencio_max_ms: int = 350) -> tuple["object", list[str], list[float]]:
+    """Genera por trozos y concatena. Devuelve (wav, frases, duraciones)."""
     torch = motor.torch
-    frases = partir_frases(regionalizar(texto, variante))
-    partes, duraciones = [], []
+    ajustes = normalizar_pausas(pausas)
+    trozos = partir_trozos(regionalizar(texto, variante), cortar_comas=cortar_comas)
+    partes, duraciones, frases = [], [], []
 
-    for i, frase in enumerate(frases):
+    for i, (trozo, nivel) in enumerate(trozos):
         if progreso:
-            progreso(i, len(frases), frase)
-        esperado = len(frase) / 15.0  # ~15 car/s de habla
+            progreso(i, len(trozos), trozo)
+        esperado = len(trozo) / 15.0  # ~15 car/s de habla
         for intento in range(3):
-            wav = motor.frase(frase, ref, lang, exag, cfg, seed + i * 17 + intento)
+            wav = motor.frase(trozo, ref, lang, exag, cfg, seed + i * 17 + intento)
+            if recortar:
+                wav = recortar_silencio(wav, motor.sr)
+            if silencio_max_ms:
+                wav = comprimir_silencios(wav, motor.sr, silencio_max_ms)
             dur = wav.shape[-1] / motor.sr
             raro = dur > max(8.0, esperado * 3) or dur < esperado * 0.35
             if not raro:
@@ -323,15 +512,20 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
             print(f"  ↻ reintento {intento+1} ({dur:.1f}s vs {esperado:.1f}s esperados)",
                   file=sys.stderr)
         else:
-            print(f"  ⚠ frase problemática, se usa igual: {frase[:60]!r}", file=sys.stderr)
+            print(f"  ⚠ frase problemática, se usa igual: {trozo[:60]!r}", file=sys.stderr)
 
-        if partes:
-            partes.append(torch.zeros(int(0.18 * motor.sr)))
-            duraciones[-1] += 0.18  # la pausa cierra la frase anterior; así los
-                                    # tiempos siguen alineados con `frases`
+        frases.append(trozo)
         partes.append(wav)
         duraciones.append(dur)
-        print(f"  · {dur:5.2f}s  {frase[:70]}", file=sys.stderr)
+
+        # La pausa cierra el trozo anterior; así los tiempos del SRT siguen
+        # alineados con `frases`.
+        if i < len(trozos) - 1:
+            pausa = ajustes.get(nivel, ajustes["frase"])
+            if pausa > 0:
+                partes.append(torch.zeros(int(pausa * motor.sr)))
+                duraciones[-1] += pausa
+        print(f"  · {dur:5.2f}s [{nivel}]  {trozo[:60]}", file=sys.stderr)
 
     return torch.cat(partes), frases, duraciones
 
@@ -571,7 +765,10 @@ def cmd_say(a: argparse.Namespace) -> None:
     t0 = time.time()
     motor = Motor(a.threads, a.variante)
     wav, frases, durs = sintetizar(motor, a.text, ref, a.lang, a.exag, a.cfg, a.seed,
-                                   variante=a.variante)
+                                   variante=a.variante, pausas=pausas_de(a),
+                                   cortar_comas=a.cortar_comas,
+                                   recortar=not a.sin_recorte,
+                                   silencio_max_ms=a.silencio_max)
 
     import torchaudio as ta
     tmp = salida.with_suffix(".wav") if salida.suffix.lower() != ".wav" else salida
@@ -611,7 +808,10 @@ def cmd_batch(a: argparse.Namespace) -> None:
         print(f"[{i}/{len(items)}] {cid}", file=sys.stderr)
         wav, frases, durs = sintetizar(motor, texto, ref, lang, a.exag, a.cfg,
                                        it.get("seed", a.seed + i),
-                                       variante=a.variante)
+                                       variante=a.variante, pausas=pausas_de(a),
+                                       cortar_comas=a.cortar_comas,
+                                       recortar=not a.sin_recorte,
+                                       silencio_max_ms=a.silencio_max)
         wavpath = outdir / f"{cid}.wav"
         ta.save(str(wavpath), wav.unsqueeze(0), motor.sr)
         mp3 = outdir / f"{cid}.mp3"
@@ -685,6 +885,18 @@ def main() -> None:
     ss.add_argument("--exag", type=float, default=0.5, help="expresividad 0–1 (def. 0.5)")
     ss.add_argument("--cfg", type=float, default=0.5, help="apego al texto 0–1 (def. 0.5)")
     ss.add_argument("--seed", type=int, default=42)
+    ss.add_argument("--pausa-frase", type=int, default=180, metavar="MS",
+                    help="pausa después de . ! ? (def. 180 ms)")
+    ss.add_argument("--pausa-coma", type=int, default=90, metavar="MS",
+                    help="pausa después de coma (def. 90 ms)")
+    ss.add_argument("--pausa-parrafo", type=int, default=300, metavar="MS",
+                    help="pausa entre párrafos (def. 300 ms)")
+    ss.add_argument("--cortar-comas", action="store_true",
+                    help="corta en cada coma para controlar esa pausa")
+    ss.add_argument("--sin-recorte", action="store_true",
+                    help="no recorta el silencio que agrega el modelo")
+    ss.add_argument("--silencio-max", type=int, default=350, metavar="MS",
+                    help="acorta a este máximo los silencios internos (def. 350, 0 = no tocar)")
     ss.add_argument("--variante", choices=["neutro", "latam", "argentina", "espana"],
                     default="neutro")
     ss.add_argument("--lufs", type=float, default=-14.0)
@@ -700,6 +912,12 @@ def main() -> None:
     sb.add_argument("--exag", type=float, default=0.5)
     sb.add_argument("--cfg", type=float, default=0.5)
     sb.add_argument("--seed", type=int, default=42)
+    sb.add_argument("--pausa-frase", type=int, default=180, metavar="MS")
+    sb.add_argument("--pausa-coma", type=int, default=90, metavar="MS")
+    sb.add_argument("--pausa-parrafo", type=int, default=300, metavar="MS")
+    sb.add_argument("--cortar-comas", action="store_true")
+    sb.add_argument("--sin-recorte", action="store_true")
+    sb.add_argument("--silencio-max", type=int, default=350, metavar="MS")
     sb.add_argument("--variante", choices=["neutro", "latam", "argentina", "espana"],
                     default="neutro")
     sb.add_argument("--lufs", type=float, default=-14.0)

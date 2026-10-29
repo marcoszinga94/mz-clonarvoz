@@ -1,0 +1,5 @@
+# Le dice al builder de FastAPI de Vercel dónde está la aplicación.
+# (Sin esto, Vercel no detecta servidor.py porque no está en una ruta por defecto.)
+
+[tool.vercel]
+entrypoint = "servidor:app"

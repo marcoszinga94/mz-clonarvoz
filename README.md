@@ -60,8 +60,12 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
   entretener, contar una historia) y duración (15, 30 o 60 s). Devuelve un guion
   de 3 a 8 líneas listo para editar. Es plantilla, no modelo: instantáneo y sin
   descargar nada más. "Otra versión" rota las plantillas para variar el ángulo.
-- **Ajustes**: expresividad, apego al texto, idioma, semilla. En español hay
-  cuatro variedades: neutro, **argentino**, LatAm y España.
+- **Ajustes**: expresividad, apego al texto, idioma, semilla y pausas. En español
+  hay cuatro variedades: neutro, **argentino**, LatAm y España. Las pausas se
+  controlan por separado (frase, coma, párrafo, en ms), más un **silencio máximo**
+  que acorta las que inventa el modelo y un recorte del silencio de borde de cada
+  trozo. Si querés que la coma también sea un punto de corte, activá
+  *Cortar en cada coma*.
 - **Cola**: una generación a la vez (la CPU manda), con progreso por frase y
   resultados que aparecen a medida que terminan.
 - **Biblioteca**: reproductor, descarga del MP3 y del SRT, borrado.
@@ -125,7 +129,11 @@ Parámetros que de verdad importan:
 - `--exag 0.5` expresividad. Baja a **0.3–0.4** para narración/corporativo; sube a 0.6–0.7 para hooks.
 - `--cfg 0.5` apego al texto. Súbelo a 0.6 si se "inventa" palabras; bájalo si suena monótono.
 - `--seed 42` fija la toma. Misma semilla + mismo texto = mismo audio (reproducible).
-- El texto se parte por frases (`partir_frases`) y se concatena con 180 ms de aire.
+- El texto se parte por frases (`partir_trozos`) y se concatena con una pausa
+  configurable (180 ms por defecto, `--pausa-frase`). Relación de dependencia
+  entre trozos: `cortar_comas` hace que cada coma sea un corte con su pausa
+  (`--pausa-coma`), y `silencio_max_ms` acorta los silencios internos que
+  agregue el modelo (`--silencio-max`, 0 = no tocar).
   Esto evita el límite de contexto (~30 s) y las alucinaciones en textos largos.
 - Guardia anti-alucinación: si una frase sale 3× más larga o 3× más corta de lo esperable,
   se reintenta con otra semilla hasta 3 veces.
@@ -233,6 +241,9 @@ ClonarVoz/
 ```
 
 Opciones comunes: `--voice`, `--lang es`, `--exag`, `--cfg`, `--seed`, `--threads 6`.
+
+Pausas: `--pausa-frase 180`, `--pausa-coma 90`, `--pausa-parrafo 300` (ms),
+`--silencio-max 350` (0 = no tocar), `--cortar-comas`, `--sin-recorte`.
 
 ---
 

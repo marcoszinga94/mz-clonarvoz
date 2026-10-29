@@ -35,7 +35,10 @@ async function api(path, opts) {
   return r.json();
 }
 
-const estado = { refs: [], motor: "cargando", job: null, timer: null, polling: null, grabando: null };
+const estado = {
+  refs: [], motor: "cargando", job: null, timer: null, polling: null, grabando: null,
+  colaDOM: new Map(), colaTimer: null, colaTerminados: 0, colaOcultos: new Set(),
+};
 
 function toast(msg, malo = false) {
   const t = $("#toast");
@@ -237,6 +240,7 @@ async function generar() {
 
   const items = lineas.map((texto, i) => ({ nombre: tituloDe(texto, i), texto }));
   const { lang, variante } = desglosarIdioma($("#lang").value);
+  const ms = (sel) => Math.max(0, parseFloat($(sel).value || "0")) / 1000;
   const body = {
     items,
     ref: $("#select-voz").value || null,
@@ -245,18 +249,26 @@ async function generar() {
     exag: parseFloat($("#exag").value),
     cfg: parseFloat($("#cfg").value),
     seed: parseInt($("#seed").value || "42", 10),
+    pausas: {
+      frase: ms("#pausa-frase"),
+      coma: ms("#pausa-coma"),
+      parrafo: ms("#pausa-parrafo"),
+    },
+    cortar_comas: $("#cortar-comas").checked,
+    recortar_silencio: $("#recorte").value === "1",
+    silencio_max_ms: Math.max(0, parseInt($("#silencio-max").value || "350", 10)),
   };
 
-  $("#btn-generar").disabled = true;
+  // No se bloquea el botón: se puede encolar otro guion mientras este se genera.
   try {
-    const r = await api("/api/generar", {
+    await api("/api/generar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    seguirJob(r.job, items.length);
+    toast(`En cola: ${items.length} clip${items.length === 1 ? "" : "s"}`);
+    await refrescarCola();
   } catch (e) {
-    $("#btn-generar").disabled = false;
     errorGuion(String(e.message));
   }
 }
@@ -276,55 +288,90 @@ function prepararTrabajo(titulo, detalle) {
   }, 500);
 }
 
-function seguirJob(jobId, nClips) {
-  prepararTrabajo("Generando", "En cola");
+const COLA_ESTADOS = { en_cola: "En cola", generando: "Generando", listo: "Listo", error: "Error" };
 
-  let vistos = 0;
-  clearTimeout(estado.polling);
-  const tick = async () => {
-    try {
-      const j = await api(`/api/job/${jobId}`);
-      $("#barra-fill").style.width = `${Math.max(2, Math.round(j.progreso * 100))}%`;
-      $("#trabajo-detalle").textContent = j.detalle || "";
+function plantillaCola(j) {
+  const titulo = j.n_items === 1 ? "1 clip" : `${j.n_items} clips`;
+  return `<div class="cola-item" data-estado="${j.estado}" data-vistos="0">
+    <div class="cola-h">
+      <span class="cola-t">${esc(titulo)}</span>
+      <span class="cola-badge">${COLA_ESTADOS[j.estado] || j.estado}</span>
+      <span class="mono hint cola-tiempo">0:00</span>
+    </div>
+    <div class="barra"><span></span></div>
+    <p class="cola-detalle">En cola</p>
+    <div class="resultados"></div>
+  </div>`;
+}
 
-      if (j.resultados.length > vistos) {
-        const nuevos = j.resultados.slice(vistos);
-        vistos = j.resultados.length;
-        nuevos.forEach((r) => {
-          $("#resultados-parciales").insertAdjacentHTML("beforeend", filaResultado(r));
-        });
-      }
-
-      if (j.estado === "listo") {
-        clearInterval(estado.timer);
-        clearTimeout(estado.polling);
-        $("#spin").hidden = true;
-        $("#trabajo-titulo").textContent = `${nClips} clip${nClips === 1 ? "" : "s"} listo${nClips === 1 ? "" : "s"}`;
-        $("#trabajo-detalle").textContent = `Generado en ${fmt(j.segundos || 0)} · −14 LUFS · 48 kHz`;
-        $("#barra-fill").style.width = "100%";
-        $("#btn-generar").disabled = false;
-        cargarBiblioteca();
-        return;
-      }
-      if (j.estado === "error") {
-        clearInterval(estado.timer);
-        clearTimeout(estado.polling);
-        $("#spin").hidden = true;
-        $("#trabajo-titulo").textContent = "No se pudo generar";
-        $("#trabajo-detalle").textContent = j.error || "error desconocido";
-        $("#btn-generar").disabled = false;
-        return;
-      }
-      estado.polling = setTimeout(tick, 1200);
-    } catch (e) {
-      clearInterval(estado.timer);
-      $("#spin").hidden = true;
-      $("#trabajo-titulo").textContent = "Se cortó la conexión";
-      $("#trabajo-detalle").textContent = String(e.message);
-      $("#btn-generar").disabled = false;
+async function refrescarCola() {
+  clearTimeout(estado.colaTimer);
+  try {
+    const r = await api("/api/trabajos");
+    pintarCola(r.trabajos || []);
+    if ((r.trabajos || []).some((j) => j.estado === "en_cola" || j.estado === "generando")) {
+      estado.colaTimer = setTimeout(refrescarCola, 1500);
     }
-  };
-  estado.polling = setTimeout(tick, 600);
+  } catch (_) {
+    estado.colaTimer = setTimeout(refrescarCola, 5000);
+  }
+}
+
+function pintarCola(todos) {
+  const lista = todos.filter((j) => !estado.colaOcultos.has(j.id));
+  const cont = $("#cola");
+  $("#cola-card").hidden = lista.length === 0;
+  if (!lista.length) {
+    cont.innerHTML = "";
+    estado.colaDOM.clear();
+    $("#cola-resumen").textContent = "";
+    return;
+  }
+
+  const generando = lista.filter((j) => j.estado === "generando").length;
+  const espera = lista.filter((j) => j.estado === "en_cola").length;
+  const listos = lista.filter((j) => j.estado === "listo").length;
+  const errores = lista.filter((j) => j.estado === "error").length;
+  const partes = [];
+  if (generando) partes.push("generando ahora");
+  if (espera) partes.push(`${espera} en espera`);
+  if (!generando && !espera) {
+    if (listos) partes.push(`${listos} listo${listos === 1 ? "" : "s"}`);
+    if (errores) partes.push(`${errores} con error`);
+  }
+  $("#cola-resumen").textContent = partes.join(" · ");
+  $("#btn-limpiar-cola").hidden = Boolean(generando || espera);
+
+  const ahora = Date.now() / 1000;
+  lista.forEach((j) => {
+    let nodo = estado.colaDOM.get(j.id);
+    if (!nodo) {
+      cont.insertAdjacentHTML("beforeend", plantillaCola(j));
+      nodo = cont.lastElementChild;
+      estado.colaDOM.set(j.id, nodo);
+    }
+    nodo.dataset.estado = j.estado;
+    nodo.querySelector(".cola-badge").textContent = COLA_ESTADOS[j.estado] || j.estado;
+    nodo.querySelector(".barra span").style.width = `${Math.max(2, Math.round((j.progreso || 0) * 100))}%`;
+    nodo.querySelector(".cola-detalle").textContent =
+      j.estado === "error" ? (j.error || "error desconocido")
+        : j.estado === "listo" ? `Generado en ${fmt(j.segundos || 0)} · −14 LUFS · 48 kHz`
+          : j.detalle || "";
+    nodo.querySelector(".cola-tiempo").textContent =
+      fmt(j.segundos != null ? j.segundos : ahora - (j.creado || ahora));
+
+    // Los resultados se agregan de a uno: no se re-renderiza el audio que ya suena.
+    const caja = nodo.querySelector(".resultados");
+    const vistos = Number(nodo.dataset.vistos || 0);
+    (j.resultados || []).slice(vistos).forEach((r) => {
+      caja.insertAdjacentHTML("beforeend", filaResultado(r));
+    });
+    nodo.dataset.vistos = (j.resultados || []).length;
+  });
+
+  const terminados = lista.filter((j) => j.estado === "listo" || j.estado === "error").length;
+  if (terminados && terminados !== estado.colaTerminados) cargarBiblioteca();
+  estado.colaTerminados = terminados;
 }
 
 function filaResultado(r) {
@@ -553,6 +600,14 @@ $("#exag").addEventListener("input", (e) => { $("#exag-val").textContent = (+e.t
 $("#cfg").addEventListener("input", (e) => { $("#cfg-val").textContent = (+e.target.value).toFixed(2); });
 $("#guion").addEventListener("input", actualizarContador);
 $("#btn-generar").addEventListener("click", generar);
+$("#btn-limpiar-cola").addEventListener("click", () => {
+  estado.colaDOM.forEach((_, id) => estado.colaOcultos.add(id));
+  estado.colaDOM.forEach((nodo) => nodo.remove());
+  estado.colaDOM.clear();
+  estado.colaTerminados = 0;
+  $("#cola-card").hidden = true;
+  $("#cola-resumen").textContent = "";
+});
 $("#lista").addEventListener("click", (e) => {
   const b = e.target.closest("[data-borrar]");
   if (b) borrar(b.dataset.borrar);
@@ -587,6 +642,9 @@ $("#btn-reset").addEventListener("click", () => {
   $("#exag").value = 0.5; $("#exag-val").textContent = "0.50";
   $("#cfg").value = 0.5; $("#cfg-val").textContent = "0.50";
   $("#seed").value = 42; $("#lang").value = "es";
+  $("#pausa-frase").value = 180; $("#pausa-coma").value = 90; $("#pausa-parrafo").value = 300;
+  $("#silencio-max").value = 350;
+  $("#cortar-comas").checked = false; $("#recorte").value = "1";
 });
 
 $("#btn-ejemplo").addEventListener("click", () => {
@@ -614,4 +672,5 @@ document.addEventListener("keydown", (e) => {
 
 cargarEstado();
 cargarBiblioteca();
+refrescarCola();
 actualizarContador();

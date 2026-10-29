@@ -7,3 +7,7 @@ __pycache__/
 
 # checkpoints enlazados a la caché de HF
 models/
+
+# logs locales
+*.log
+*.err

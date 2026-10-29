@@ -14,6 +14,7 @@ import queue
 from collections import OrderedDict
 import re
 import shutil
+import tempfile
 import threading
 import time
 import unicodedata
@@ -159,8 +160,10 @@ def _procesar(job: dict) -> None:
     items = job["items"]
     n = len(items)
     variante = job.get("variante", "neutro")
-    if variante != "neutro" and variante not in MOTORES:
-        job["detalle"] = "cargando pack de español (la primera vez baja ~3,5 GB)"
+    # Cargar otro pack tarda ~1 min: se informa en vez de dejar el trabajo "en cola".
+    if clave_motor(variante) not in MOTORES:
+        job["estado"] = "generando"
+        job["detalle"] = "cargando el pack de español (solo la primera vez)"
     motor = obtener_motor(variante)
     job["estado"] = "generando"
 
@@ -172,6 +175,9 @@ def _procesar(job: dict) -> None:
         wav, frases, durs = voz.sintetizar(
             motor, it["texto"], ref, job["lang"], job["exag"], job["cfg"],
             job["seed"] + k * 101, progreso=cb, variante=variante,
+            pausas=job.get("pausas"), cortar_comas=job.get("cortar_comas", False),
+            recortar=job.get("recortar_silencio", True),
+            silencio_max_ms=job.get("silencio_max_ms", 350),
         )
 
         base = f"{slug(it['nombre'])}-{uuid.uuid4().hex[:4]}"
@@ -194,6 +200,10 @@ def _procesar(job: dict) -> None:
             "cfg": job["cfg"],
             "seed": job["seed"] + k * 101,
             "ref": job.get("ref"),
+            "pausas": voz.normalizar_pausas(job.get("pausas")),
+            "cortar_comas": job.get("cortar_comas", False),
+            "recortar_silencio": job.get("recortar_silencio", True),
+            "silencio_max_ms": job.get("silencio_max_ms", 350),
             "creado": time.time(),
         }, ensure_ascii=False), encoding="utf-8")
 
@@ -287,7 +297,7 @@ def estado() -> dict:
 @app.post("/api/ref")
 async def subir_ref(archivo: UploadFile = File(...), nombre: str = Form("voz")) -> dict:
     sufijo = Path(archivo.filename or "toma.wav").suffix or ".wav"
-    tmp = Path("/tmp") / f"ref-{uuid.uuid4().hex}{sufijo}"
+    tmp = Path(tempfile.gettempdir()) / f"ref-{uuid.uuid4().hex}{sufijo}"
     try:
         with tmp.open("wb") as f:
             shutil.copyfileobj(archivo.file, f)
@@ -346,6 +356,10 @@ def generar(body: dict) -> dict:
         "cfg": float(body.get("cfg", 0.5)),
         "seed": int(body.get("seed", 42)),
         "lufs": float(body.get("lufs", -14)),
+        "pausas": voz.normalizar_pausas(body.get("pausas")),
+        "cortar_comas": bool(body.get("cortar_comas", False)),
+        "recortar_silencio": bool(body.get("recortar_silencio", True)),
+        "silencio_max_ms": int(body.get("silencio_max_ms", 350)),
         "resultados": [],
         "error": None,
         "creado": time.time(),
@@ -357,7 +371,7 @@ def generar(body: dict) -> dict:
 @app.post("/api/transcribir")
 async def api_transcribir(archivo: UploadFile = File(...), lang: str = Form("es")) -> dict:
     sufijo = Path(archivo.filename or "audio.wav").suffix or ".wav"
-    tmp = Path("/tmp") / f"tx-{uuid.uuid4().hex}{sufijo}"
+    tmp = Path(tempfile.gettempdir()) / f"tx-{uuid.uuid4().hex}{sufijo}"
     with tmp.open("wb") as f:
         shutil.copyfileobj(archivo.file, f)
     if tmp.stat().st_size < 2000:
@@ -387,6 +401,29 @@ def job(jid: str) -> dict:
 @app.get("/api/historial")
 def api_historial() -> dict:
     return {"clips": historial()}
+
+
+@app.get("/api/trabajos")
+def api_trabajos() -> dict:
+    """Cola de generación: los activos y los terminados en los últimos 10 min.
+
+    La cola es una sola (una generación a la vez, la CPU manda), pero el cliente
+    puede encolar varios trabajos y ver el avance de cada uno.
+    """
+    ahora = time.time()
+    salida = []
+    for j in TRABAJOS.values():
+        if j.get("tipo") == "transcripcion":
+            continue
+        fin = j.get("fin") or j.get("creado", 0)
+        activo = j.get("estado") in ("en_cola", "generando")
+        if not activo and ahora - fin > 600:
+            continue
+        d = {k: v for k, v in j.items() if k not in ("items", "ruta")}
+        d["n_items"] = len(j.get("items") or [])
+        salida.append(d)
+    salida.sort(key=lambda j: j.get("creado", 0))
+    return {"trabajos": salida, "cola": COLA.qsize()}
 
 
 @app.delete("/api/historial/{nombre}")
