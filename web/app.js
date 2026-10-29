@@ -104,9 +104,12 @@ function pintarRefs(refs) {
   } else {
     refs.forEach((r) => {
       const sello = r.mtime ? ` · ${hora(r.mtime)}` : "";
-      sel.append(new Option(`${bonito(r.nombre)} · ${fmt(r.dur)}${sello}`, r.nombre));
+      const nota = r.nota != null ? ` · ${r.nota.toFixed(2)}` : "";
+      sel.append(new Option(`${bonito(r.nombre)} · ${fmt(r.dur)}${nota}${sello}`, r.nombre));
     });
-    const elegido = refs.find((r) => r.nombre === antes) || refs[0];
+    const conNota = refs.filter((r) => r.nota != null);
+    const mejor = conNota.length ? conNota.reduce((a, b) => (b.nota > a.nota ? b : a)) : refs[0];
+    const elegido = refs.find((r) => r.nombre === antes) || mejor;
     sel.value = elegido.nombre;
   }
   pintarRefAudio();
@@ -130,6 +133,7 @@ function pintarRefAudio() {
   if (audio.src !== url) audio.src = url;
   $("#ref-dur").textContent = fmt(ref.dur);
   $("#btn-calibrar").hidden = false;
+  $("#btn-evaluar").hidden = estado.refs.length < 2;
   pintarAnalisis(ref.analisis);
   if (ref.exag != null) aplicarExag(ref.exag, false);
 }
@@ -677,6 +681,80 @@ function seguirCalibracion(jobId) {
   estado.polling = setTimeout(tick, 600);
 }
 
+// --------------------------------------------------------------- evaluar tomas
+
+async function evaluarTomas() {
+  const { lang, variante } = desglosarIdioma($("#lang").value);
+  prepararTrabajo("Evaluando tomas", "Comparando con tu voz");
+  $("#btn-evaluar").disabled = true;
+  try {
+    const r = await api("/api/ref/evaluar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lang, variante, exag: parseFloat($("#exag").value) }),
+    });
+    seguirEvaluacion(r.job);
+  } catch (e) {
+    $("#btn-evaluar").disabled = false;
+    $("#trabajo").hidden = true;
+    toast(String(e.message), true);
+  }
+}
+
+function seguirEvaluacion(jobId) {
+  prepararTrabajo("Evaluando tomas", "Midiendo cada referencia");
+  estado.jobActual = jobId;
+  $("#btn-cancelar-job").hidden = false;
+  $("#btn-cancelar-job").disabled = false;
+  clearTimeout(estado.polling);
+
+  const tick = async () => {
+    try {
+      const j = await api(`/api/job/${jobId}`);
+      $("#barra-fill").style.width = `${Math.max(2, Math.round(j.progreso * 100))}%`;
+      $("#trabajo-detalle").textContent = j.detalle || "";
+
+      if (j.estado === "listo" && j.evaluacion) {
+        clearInterval(estado.timer);
+        clearTimeout(estado.polling);
+        $("#spin").hidden = true;
+        $("#btn-cancelar-job").hidden = true;
+        $("#btn-evaluar").disabled = false;
+        estado.jobActual = null;
+        const tomas = j.evaluacion.tomas;
+        $("#trabajo-titulo").textContent = "Mejor toma elegida";
+        $("#trabajo-detalle").textContent =
+          tomas.map((t) => `${t.ref.replace(".wav", "")}: ${t.score.toFixed(2)}`).join(" · ");
+        $("#barra-fill").style.width = "100%";
+        if (j.evaluacion.mejor) {
+          $("#select-voz").value = j.evaluacion.mejor;
+          pintarRefAudio();
+          toast(`Usando ${bonito(j.evaluacion.mejor)} (${tomas[0].score.toFixed(2)})`);
+        }
+        cargarEstado();
+        return;
+      }
+      if (j.estado === "cancelado" || j.estado === "error") {
+        clearInterval(estado.timer);
+        clearTimeout(estado.polling);
+        $("#spin").hidden = true;
+        $("#btn-cancelar-job").hidden = true;
+        $("#btn-evaluar").disabled = false;
+        estado.jobActual = null;
+        $("#trabajo-titulo").textContent = "Evaluación cancelada";
+        $("#trabajo-detalle").textContent = j.error || "";
+        return;
+      }
+      estado.polling = setTimeout(tick, 1200);
+    } catch (e) {
+      clearInterval(estado.timer);
+      $("#btn-evaluar").disabled = false;
+      toast(String(e.message), true);
+    }
+  };
+  estado.polling = setTimeout(tick, 600);
+}
+
 // --------------------------------------------------------------- transcribir
 
 async function transcribirArchivo(file) {
@@ -834,6 +912,7 @@ $("#btn-cancelar-job").addEventListener("click", async () => {
 });
 
 $("#btn-calibrar").addEventListener("click", calibrar);
+$("#btn-evaluar").addEventListener("click", evaluarTomas);
 $("#btn-guion").addEventListener("click", abrirGuion);
 $("#btn-transcribir").addEventListener("click", () => $("#file-tx").click());
 $("#file-tx").addEventListener("change", (ev) => {

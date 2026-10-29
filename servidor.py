@@ -132,7 +132,8 @@ def refs_disponibles() -> list[dict]:
         {"nombre": p.name, "dur": round(duracion(p), 2),
          "url": f"/files/refs/{p.name}", "mtime": p.stat().st_mtime,
          "analisis": meta_ref(p).get("analisis"),
-         "exag": meta_ref(p).get("exag")}
+         "exag": meta_ref(p).get("exag"),
+         "nota": meta_ref(p).get("nota")}
         for p in archivos
     ]
 
@@ -337,6 +338,28 @@ def _calibrar(job: dict) -> None:
     guardar_meta(ref, exag=r["mejor"]["exag"], calibracion=r)
 
 
+def _evaluar(job: dict) -> None:
+    motor = obtener_motor(job.get("variante", "neutro"))
+    tomas = []
+    for i, ruta in enumerate(job["refs"]):
+        if job.get("cancelar"):
+            raise voz.Cancelado()
+        job["progreso"] = round(i / max(len(job["refs"]), 1), 3)
+        job["detalle"] = f"probando {ruta} ({i + 1} de {len(job['refs'])})"
+        p = REFS / ruta
+        if not p.exists():
+            continue
+        try:
+            r = voz.evaluar_toma(motor, p, job.get("lang", "es"), job.get("exag", 0.4))
+        except Exception:  # noqa: BLE001
+            continue
+        guardar_meta(p, nota=r["score"])
+        tomas.append(r)
+    tomas.sort(key=lambda t: t["score"], reverse=True)
+    job["evaluacion"] = {"tomas": tomas, "mejor": tomas[0]["ref"] if tomas else None}
+    job["progreso"] = 1.0
+
+
 def _worker() -> None:
     try:
         obtener_motor("neutro")
@@ -353,6 +376,8 @@ def _worker() -> None:
         try:
             if job.get("tipo") == "calibracion":
                 _calibrar(job)
+            elif job.get("tipo") == "evaluacion":
+                _evaluar(job)
             else:
                 _procesar(job)
             # _procesar puede haberlo cancelado: no pisar ese estado.
@@ -526,6 +551,25 @@ def calibrar_ref(body: dict) -> dict:
     return {"job": jid}
 
 
+@app.post("/api/ref/evaluar")
+def evaluar_refs(body: dict) -> dict:
+    refs = sorted(p.name for p in REFS.glob("*.wav")
+                  if not p.name.startswith((".", "_")) and not p.stem.endswith("-completa"))
+    if not refs:
+        raise HTTPException(400, "no hay tomas guardadas")
+    jid = uuid.uuid4().hex[:12]
+    TRABAJOS[jid] = {
+        "id": jid, "tipo": "evaluacion", "estado": "en_cola", "progreso": 0.0,
+        "detalle": "en cola", "refs": refs, "lang": body.get("lang", "es"),
+        "exag": float(body.get("exag", 0.4)), "variante": body.get("variante", "neutro"),
+        "resultados": [], "parciales": [], "cancelar": False, "error": None,
+        "creado": time.time(),
+    }
+    COLA.put(jid)
+    guardar_cola()
+    return {"job": jid}
+
+
 VIDEO_LOCK = threading.Lock()
 
 
@@ -647,7 +691,7 @@ def api_trabajos() -> dict:
     ahora = time.time()
     salida = []
     for j in TRABAJOS.values():
-        if j.get("tipo") in ("transcripcion", "calibracion"):
+        if j.get("tipo") in ("transcripcion", "calibracion", "evaluacion"):
             continue
         fin = j.get("fin") or j.get("creado", 0)
         activo = j.get("estado") in ("en_cola", "generando")

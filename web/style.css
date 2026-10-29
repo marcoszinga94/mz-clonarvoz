@@ -491,3 +491,6 @@ textarea:hover { border-color: #3d3d3d; }
 #ref-veredicto.aviso { color: #f0c15c; }
 #ref-veredicto.malo { color: var(--danger); }
 #ref-veredicto.ok { color: var(--muted); }
+
+.link-accion { display: block; margin-top: 8px; color: var(--accent); font-weight: 600; }
+.link-accion:hover { color: #e4ff96; text-decoration: none; }

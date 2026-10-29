@@ -75,6 +75,9 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
   todo y no guarda nada (corta al terminar la frase en curso, ~15 s).
 - **Calibrar**: prueba tres expresividades sobre tu referencia y elige la que
   mejor conserva el tono. Se guarda por toma y se aplica sola al elegirla.
+- **Evaluar tomas**: con varias grabaciones guardadas, mide cuál clona mejor
+  (similitud + tono) y deja seleccionada la ganadora. La nota queda en el
+  desplegable de voces.
 - **Video 9:16**: desde la biblioteca, un clic convierte el MP3 y su SRT en un
   MP4 vertical con los subtítulos quemados, listo para Reels o TikTok.
 - **Biblioteca**: reproductor, descarga del MP3 y del SRT, borrado.
@@ -96,6 +99,10 @@ referencia con acento argentino**. El modo argentino además convierte el texto
 
 Cada pack pesa ~3,5 GB: `./voz packs latam`. Si el pack no está instalado, la app
 usa el modelo base y aplica igual el cambio de texto (lo avisa en Ajustes).
+
+Cada frase se valida contra la referencia antes de aceptarse: si el timbre se
+aleja (similitud baja o tono corrido), se genera otra toma y se queda la más
+parecida.
 
 Cada clip guarda un `.json` con texto y parámetros, así que puedes reproducirlo
 exactamente después (misma semilla, mismo resultado).

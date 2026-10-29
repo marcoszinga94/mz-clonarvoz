@@ -275,6 +275,25 @@ def calibrar_referencia(motor: Motor, ref: Path, lang: str = "es",
     return {"mejor": mejor, "pruebas": pruebas, "f0_ref": round(f0r, 1)}
 
 
+def evaluar_toma(motor: Motor, ref: Path, lang: str = "es", exag: float = 0.4,
+                 seed: int = 5) -> dict:
+    """Mide qué tan bien clona una toma: genera dos frases y las compara."""
+    frases = ["Hola, esto es una prueba de mi voz.",
+              "Así suena el clon con esta toma."]
+    res = []
+    for t in frases:
+        wav, _, _ = sintetizar(motor, t, ref, lang, exag, 0.5, seed, ajustar=False)
+        score, sim, f0 = motor.puntuar(wav, ref)
+        res.append({"score": score, "sim": sim, "f0": f0})
+    return {
+        "ref": Path(ref).name,
+        "score": round(sum(r["score"] for r in res) / len(res), 3),
+        "sim": round(sum(r["sim"] for r in res) / len(res), 3),
+        "f0": round(sum(r["f0"] for r in res) / len(res), 1),
+        "pruebas": res,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Video 9:16 con subtítulos quemados
 # --------------------------------------------------------------------------- #
@@ -462,6 +481,7 @@ class Motor:
         import torch
         self.torch = torch
         self._conds = None
+        self._perfil = None
         self.variante = variante
         if threads:
             torch.set_num_threads(threads)
@@ -505,6 +525,31 @@ class Motor:
         wav = self.model.generate(texto, language_id=lang,
                                   exaggeration=exag, cfg_weight=cfg, **extra)
         return wav.squeeze(0)
+
+    def perfil(self, ref: Path):
+        """Embedding y tono de la referencia, cacheados por archivo."""
+        clave = (str(ref), ref.stat().st_mtime)
+        if self._perfil and self._perfil[0] == clave:
+            return self._perfil[1]
+        perfil = (_emb_hablante(self.model.ve, ref), _f0_mediana(ref))
+        self._perfil = (clave, perfil)
+        return perfil
+
+    def puntuar(self, wav, ref: Path) -> tuple[float, float, float]:
+        """Qué tan parecida es una toma a la referencia: (score, sim, f0)."""
+        import tempfile
+        import torchaudio as ta
+
+        e_ref, f_ref = self.perfil(ref)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            ruta = Path(tmp.name)
+        ta.save(str(ruta), wav.unsqueeze(0), self.sr)
+        try:
+            sim = _cos(e_ref, _emb_hablante(self.model.ve, ruta))
+            f0 = _f0_mediana(ruta)
+        finally:
+            ruta.unlink(missing_ok=True)
+        return round(sim - 0.002 * abs(f0 - f_ref), 3), round(sim, 3), round(f0, 1)
 
 
 # Pausas entre trozos, en segundos. Configurables desde la UI o la CLI.
@@ -671,7 +716,8 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                cortar_comas: bool = False,
                recortar: bool = True,
                silencio_max_ms: int = 350,
-               al_trozo=None, cancelado=None) -> tuple["object", list[str], list[float]]:
+               al_trozo=None, cancelado=None,
+               ajustar: bool = True) -> tuple["object", list[str], list[float]]:
     """Genera por trozos y concatena. Devuelve (wav, frases, duraciones)."""
     torch = motor.torch
     ajustes = normalizar_pausas(pausas)
@@ -698,6 +744,28 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                   file=sys.stderr)
         else:
             print(f"  ⚠ frase problemática, se usa igual: {trozo[:60]!r}", file=sys.stderr)
+
+        # Si el trozo se alejó de la voz de la referencia, se prueba otra toma
+        # y se queda la más parecida. Evita que cada frase suene a otra persona.
+        if ref and ajustar:
+            score, sim, f0 = motor.puntuar(wav, ref)
+            if score < 0.87:
+                for extra in (1, 2):
+                    if cancelado and cancelado():
+                        raise Cancelado()
+                    alt = motor.frase(trozo, ref, lang, exag, cfg,
+                                      seed + i * 17 + 101 * extra)
+                    if recortar:
+                        alt = recortar_silencio(alt, motor.sr)
+                    if silencio_max_ms:
+                        alt = comprimir_silencios(alt, motor.sr, silencio_max_ms)
+                    s_alt, sim_alt, f0_alt = motor.puntuar(alt, ref)
+                    if s_alt > score:
+                        wav, score, sim, f0 = alt, s_alt, sim_alt, f0_alt
+                    if score >= 0.87:
+                        break
+                print(f"  ⟳ ajuste de voz: {sim:.3f} / {f0:.1f} Hz → {score:.3f}",
+                      file=sys.stderr)
 
         if al_trozo:
             al_trozo(i, len(trozos), wav, trozo)
