@@ -11,3 +11,4 @@ models/
 # logs locales
 *.log
 *.err
+refs/*.json
