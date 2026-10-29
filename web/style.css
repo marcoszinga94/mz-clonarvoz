@@ -299,6 +299,7 @@ textarea:hover { border-color: #3d3d3d; }
 }
 .cola-item[data-estado="generando"] { border-color: #3a3f22; }
 .cola-item[data-estado="error"] { border-color: rgba(255, 122, 107, 0.35); }
+.cola-item[data-estado="cancelado"] { border-color: var(--line); opacity: 0.75; }
 
 .cola-h {
   display: flex; align-items: center; gap: 8px;
@@ -318,6 +319,10 @@ textarea:hover { border-color: #3d3d3d; }
 .cola-item[data-estado="error"] .cola-badge {
   border-color: rgba(255, 122, 107, 0.35); color: var(--danger);
 }
+.cola-item[data-estado="cancelado"] .cola-badge {
+  border-color: var(--line); color: var(--muted);
+}
+.btn-cancelar-cola { flex: none; }
 .cola-tiempo { white-space: nowrap; }
 .cola-detalle { font-size: 12px; line-height: 16px; color: var(--muted); margin: 0; }
 .cola-item .resultados { gap: 0; }

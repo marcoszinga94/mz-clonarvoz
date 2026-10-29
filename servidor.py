@@ -153,6 +153,10 @@ def obtener_motor(variante: str):
 def _procesar(job: dict) -> None:
     import torchaudio as ta
 
+    if job.get("cancelar"):
+        job.update(estado="cancelado", detalle="cancelado antes de empezar")
+        return
+
     ref = REFS / job["ref"] if job.get("ref") else None
     if ref is not None and not ref.exists():
         raise ValueError(f"la referencia {job['ref']} ya no existe")
@@ -426,6 +430,10 @@ def cancelar(jid: str) -> dict:
     if j["estado"] in ("listo", "error", "cancelado"):
         return {"ok": False, "estado": j["estado"]}
     j["cancelar"] = True
+    if j["estado"] == "en_cola":
+        # Todavía no arrancó: se marca cancelado ya, sin esperar al worker.
+        j["estado"] = "cancelado"
+        j["detalle"] = "cancelado antes de empezar"
     return {"ok": True, "estado": j["estado"]}
 
 

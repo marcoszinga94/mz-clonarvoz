@@ -38,6 +38,7 @@ async function api(path, opts) {
 const estado = {
   refs: [], motor: "cargando", job: null, timer: null, polling: null, grabando: null,
   colaDOM: new Map(), colaTimer: null, colaTerminados: 0, colaOcultos: new Set(),
+  jobActual: null, cancelando: new Set(),
 };
 
 function toast(msg, malo = false) {
@@ -319,7 +320,8 @@ function prepararTrabajo(titulo, detalle) {
   }, 500);
 }
 
-const COLA_ESTADOS = { en_cola: "En cola", generando: "Generando", listo: "Listo", error: "Error" };
+const COLA_ESTADOS = { en_cola: "En cola", generando: "Generando", listo: "Listo",
+                       error: "Error", cancelado: "Cancelado" };
 
 function plantillaCola(j) {
   const titulo = j.n_items === 1 ? "1 clip" : `${j.n_items} clips`;
@@ -328,6 +330,7 @@ function plantillaCola(j) {
       <span class="cola-t">${esc(titulo)}</span>
       <span class="cola-badge">${COLA_ESTADOS[j.estado] || j.estado}</span>
       <span class="mono hint cola-tiempo">0:00</span>
+      <button class="btn btn-mini btn-cancelar-cola" data-cancelar="${j.id}" type="button" hidden>Cancelar</button>
     </div>
     <div class="barra"><span></span></div>
     <p class="cola-detalle">En cola</p>
@@ -390,6 +393,17 @@ function pintarCola(todos) {
           : j.detalle || "";
     nodo.querySelector(".cola-tiempo").textContent =
       fmt(j.segundos != null ? j.segundos : ahora - (j.creado || ahora));
+
+    const activo = j.estado === "en_cola" || j.estado === "generando";
+    const btnCancelar = nodo.querySelector("[data-cancelar]");
+    btnCancelar.hidden = !activo;
+    if (activo) {
+      const cancelando = estado.cancelando.has(j.id);
+      btnCancelar.disabled = cancelando;
+      btnCancelar.textContent = cancelando ? "Cancelando…" : "Cancelar";
+    } else {
+      estado.cancelando.delete(j.id);
+    }
 
     // Los resultados se agregan de a uno: no se re-renderiza el audio que ya suena.
     const caja = nodo.querySelector(".resultados");
@@ -637,6 +651,25 @@ $("#exag").addEventListener("input", (e) => { $("#exag-val").textContent = (+e.t
 $("#cfg").addEventListener("input", (e) => { $("#cfg-val").textContent = (+e.target.value).toFixed(2); });
 $("#guion").addEventListener("input", actualizarContador);
 $("#btn-generar").addEventListener("click", generar);
+$("#cola").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-cancelar]");
+  if (!b) return;
+  const id = b.dataset.cancelar;
+  estado.cancelando.add(id);
+  b.disabled = true;
+  b.textContent = "Cancelando…";
+  try {
+    const r = await api(`/api/job/${id}/cancelar`, { method: "POST" });
+    if (!r.ok) toast(`Ese trabajo ya está ${COLA_ESTADOS[r.estado] || r.estado}`, true);
+  } catch (err) {
+    estado.cancelando.delete(id);
+    b.disabled = false;
+    b.textContent = "Cancelar";
+    toast(String(err.message), true);
+  }
+  refrescarCola();
+});
+
 $("#btn-limpiar-cola").addEventListener("click", () => {
   estado.colaDOM.forEach((_, id) => estado.colaOcultos.add(id));
   estado.colaDOM.forEach((nodo) => nodo.remove());
