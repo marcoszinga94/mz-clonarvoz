@@ -58,6 +58,14 @@ dentro de la misma toma.
 Debe imprimir 20–60 s, 24 000 Hz, medio ≈ −18 dB y pico ≤ −3 dB. Si avisa de
 duración o de picos, regraba antes de seguir.
 
+## Calibrar la expresividad
+
+Cada voz necesita un punto distinto de expresividad: de más, el clon sube el
+tono y suena a otra persona; de menos, queda plano. El botón **Calibrar** prueba
+0,30 / 0,40 / 0,50, mide similitud de hablante y tono (F0) contra tu toma, y deja
+el mejor valor guardado en `refs/<toma>.json`. Cuesta ~1 min por toma y se hace
+una sola vez.
+
 ## Elige entre varias tomas
 
 Genera el mismo texto con 2–3 referencias y quédate con la que suene más a ti:

@@ -148,6 +148,165 @@ def cmd_prep(a: argparse.Namespace) -> None:
         print("  ⚠ pico muy alto, probablemente el audio original saturaba.")
 
 
+
+# --------------------------------------------------------------------------- #
+# Referencia: análisis y calibración de expresividad
+# --------------------------------------------------------------------------- #
+
+def analizar_referencia(path: Path) -> dict:
+    """Mide la calidad de una toma y devuelve un veredicto con avisos."""
+    import numpy as np
+    import soundfile as sf
+
+    path = Path(path)
+    st = probe_stats(path)
+    dur = float(st["dur"] or 0)
+    pico, rms = st.get("peak_db"), st.get("mean_db")
+
+    # SNR por percentiles de energía en ventanas de 50 ms: el p10 es el ruido
+    # de fondo, el p90 el habla. Más estable que el "noise floor" de astats,
+    # que devuelve -inf cuando hay silencios digitales.
+    w, sr = sf.read(str(path), dtype="float32", always_2d=False)
+    if getattr(w, "ndim", 1) > 1:
+        w = w.mean(axis=1)
+    ventana = max(1, int(0.05 * sr))
+    n = len(w) // ventana
+    snr = None
+    if n > 4:
+        marcos = w[: n * ventana].reshape(n, ventana)
+        nivel = 20 * np.log10(np.sqrt((marcos ** 2).mean(axis=1)) + 1e-9)
+        utiles = nivel[nivel > -70]  # descarta silencio digital
+        ruido = float(np.percentile(utiles, 10)) if len(utiles) else -90.0
+        habla = float(np.percentile(nivel, 90))
+        snr = round(min(habla - ruido, 45.0), 1)
+
+    salida = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(path), "-af",
+         "silencedetect=noise=-40dB:d=0.25", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr
+    silencio = sum(float(x) for x in re.findall(r"silence_duration: ([\d.]+)", salida))
+    pct_silencio = round(100 * silencio / dur, 1) if dur else 0.0
+    saturado = bool(pico is not None and pico > -0.2)
+
+    avisos = []
+    if dur < 3:
+        avisos.append("dura menos de 3 s: el clon va a ser inestable")
+    elif dur < 10:
+        avisos.append("corta: 20–60 s dan un timbre más estable")
+    if saturado:
+        avisos.append("el audio satura: baja el gain y regrabá")
+    if snr is not None and snr < 18:
+        avisos.append(f"ruido de fondo alto (SNR {snr} dB)")
+    if pct_silencio > 30:
+        avisos.append(f"{pct_silencio}% de silencio: recortá las pausas")
+
+    if dur < 3:
+        veredicto = "malo"
+    else:
+        veredicto = "aviso" if avisos else "ok"
+
+    return {
+        "dur": round(dur, 2), "pico_db": pico, "rms_db": rms,
+        "snr_db": snr, "silencio_pct": pct_silencio, "saturado": saturado,
+        "veredicto": veredicto, "avisos": avisos,
+    }
+
+
+def _emb_hablante(ve, ruta: Path):
+    import numpy as np
+    import librosa
+    w, _ = librosa.load(str(ruta), sr=16000, mono=True)
+    return ve.embeds_from_wavs([w], sample_rate=16000).mean(axis=0)
+
+
+def _f0_mediana(ruta: Path) -> float:
+    import numpy as np
+    import librosa
+    w, _ = librosa.load(str(ruta), sr=16000, mono=True)
+    w = w[: 16000 * 10]
+    f0, _, _ = librosa.pyin(w, fmin=60, fmax=400, sr=16000, frame_length=1024)
+    f0 = f0[np.isfinite(f0)]
+    return float(np.median(f0)) if len(f0) else 0.0
+
+
+def _cos(a, b) -> float:
+    import numpy as np
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def calibrar_referencia(motor: Motor, ref: Path, lang: str = "es",
+                        exags=(0.30, 0.40, 0.50), seed: int = 7,
+                        progreso=None) -> dict:
+    """Prueba varias expresividades y elige la que más se parece a la toma.
+
+    Mide dos cosas por prueba: similitud del embedding del hablante y distancia
+    del tono (F0) contra la referencia. Cuesta ~1 min y se hace una vez por toma.
+    """
+    import tempfile
+    import torchaudio as ta
+
+    ref = Path(ref)
+    ve = motor.model.ve
+    er = _emb_hablante(ve, ref)
+    f0r = _f0_mediana(ref)
+    texto = "Hola, esto es una prueba corta de mi voz para calibrar el tono."
+
+    pruebas = []
+    for i, exag in enumerate(exags):
+        if progreso:
+            progreso(i, len(exags), f"expresividad {exag:.2f}")
+        wav, _, _ = sintetizar(motor, texto, ref, lang, exag, 0.5, seed,
+                               recortar=True, silencio_max_ms=0)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            ruta = Path(tmp.name)
+        ta.save(str(ruta), wav.unsqueeze(0), motor.sr)
+        try:
+            sim = _cos(er, _emb_hablante(ve, ruta))
+            f0g = _f0_mediana(ruta)
+        finally:
+            ruta.unlink(missing_ok=True)
+        pruebas.append({
+            "exag": round(exag, 2), "sim": round(sim, 3), "f0": round(f0g, 1),
+            "score": round(sim - 0.002 * abs(f0g - f0r), 3),
+        })
+
+    mejor = max(pruebas, key=lambda p: p["score"])
+    return {"mejor": mejor, "pruebas": pruebas, "f0_ref": round(f0r, 1)}
+
+
+# --------------------------------------------------------------------------- #
+# Video 9:16 con subtítulos quemados
+# --------------------------------------------------------------------------- #
+
+def exportar_video(mp3: Path, srt: Path | None, dst: Path,
+                   color: str = "0x0B0D05") -> dict:
+    mp3, dst = Path(mp3), Path(dst)
+    dur = probe_duration(mp3)
+    if dur <= 0:
+        raise RuntimeError("no pude leer la duración del audio")
+
+    vf = None
+    if srt and Path(srt).exists():
+        # Los valores de force_style van en el espacio del script (384x288),
+        # no en píxeles: FontSize 14 ≈ 93 px en un lienzo de 1080x1920.
+        estilo = ("FontName=DejaVu Sans,FontSize=14,PrimaryColour=&H00FFFFFF,"
+                  "OutlineColour=&H00121212,BorderStyle=1,Outline=2,Shadow=0,"
+                  "MarginL=5,MarginR=5,MarginV=70,Alignment=2")
+        vf = f"subtitles=filename='{Path(srt).as_posix()}':force_style='{estilo}'"
+
+    orden = ["-f", "lavfi", "-i", f"color=c={color}:s=1080x1920:r=30:d={dur:.3f}",
+             "-i", str(mp3)]
+    if vf:
+        orden += ["-vf", vf]
+    orden += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+              "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+              "-movflags", "+faststart", "-shortest", str(dst)]
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg(orden)
+    return {"mp4": dst.name, "dur": round(dur, 2), "bytes": dst.stat().st_size}
+
+
 # --------------------------------------------------------------------------- #
 # Variedades de español
 # --------------------------------------------------------------------------- #
@@ -470,6 +629,25 @@ def partir_trozos(texto: str, max_chars: int = 180,
                         buf = parte
                 if buf:
                     partes.append(buf)
+
+            # Sin comas, una frase puede pasarse del límite de contexto del
+            # modelo: se corta por palabras para no excederlo nunca.
+            expandidas: list[str] = []
+            for parte in partes:
+                if len(parte) <= max_chars:
+                    expandidas.append(parte)
+                    continue
+                buf = ""
+                for palabra in parte.split():
+                    if len(buf) + len(palabra) + 1 <= max_chars:
+                        buf = f"{buf} {palabra}".strip()
+                    else:
+                        if buf:
+                            expandidas.append(buf)
+                        buf = palabra
+                if buf:
+                    expandidas.append(buf)
+            partes = expandidas
 
             for k, parte in enumerate(partes):
                 ultima = k == len(partes) - 1

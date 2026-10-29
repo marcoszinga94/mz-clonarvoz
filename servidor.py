@@ -46,10 +46,10 @@ COLA_TX: queue.Queue[str] = queue.Queue()
 _DUR_CACHE: dict[str, tuple[float, float]] = {}
 
 LANGS = {
-    "es": "Español (neutro)",
-    "es-AR": "Español (argentino)",
-    "es-419": "Español (LatAm)",
-    "es-ES": "Español (España)",
+    "es": "Español",
+    "es-AR": "Español AR",
+    "es-419": "Español LatAm",
+    "es-ES": "Español ES",
     "en": "Inglés", "pt": "Portugués", "fr": "Francés",
     "de": "Alemán", "it": "Italiano", "ja": "Japonés", "ko": "Coreano",
     "zh": "Chino", "hi": "Hindi", "ar": "Árabe", "ru": "Ruso",
@@ -93,10 +93,29 @@ def historial() -> list[dict]:
             "titulo": meta.get("titulo") or p.stem,
             "mp3": f"/files/salida/{p.name}",
             "srt": f"/files/salida/{p.stem}.srt" if p.with_suffix(".srt").exists() else None,
+            "mp4": f"/files/salida/{p.stem}.mp4" if p.with_suffix(".mp4").exists() else None,
             "dur": round(duracion(p), 2),
             "mtime": p.stat().st_mtime,
         })
     return salida
+
+
+def meta_ref(ruta: Path) -> dict:
+    side = ruta.with_suffix(".json")
+    if side.exists():
+        try:
+            return json.loads(side.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def guardar_meta(ruta: Path, **datos) -> None:
+    ruta = Path(ruta)
+    meta = meta_ref(ruta)
+    meta.update(datos)
+    ruta.with_suffix(".json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def refs_disponibles() -> list[dict]:
@@ -107,7 +126,9 @@ def refs_disponibles() -> list[dict]:
     archivos.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return [
         {"nombre": p.name, "dur": round(duracion(p), 2),
-         "url": f"/files/refs/{p.name}", "mtime": p.stat().st_mtime}
+         "url": f"/files/refs/{p.name}", "mtime": p.stat().st_mtime,
+         "analisis": meta_ref(p).get("analisis"),
+         "exag": meta_ref(p).get("exag")}
         for p in archivos
     ]
 
@@ -115,11 +136,16 @@ def refs_disponibles() -> list[dict]:
 def rotar_tomas(destino: Path) -> None:
     """Deja la toma nueva en `destino` y conserva las TOMAS-1 anteriores."""
     destino = Path(destino)
-    (destino.with_name(f"{destino.stem}-{TOMAS}.wav")).unlink(missing_ok=True)
+    viejo = destino.with_name(f"{destino.stem}-{TOMAS}.wav")
+    viejo.unlink(missing_ok=True)
+    viejo.with_suffix(".json").unlink(missing_ok=True)
     for i in range(TOMAS - 1, 0, -1):
         origen = destino if i == 1 else destino.with_name(f"{destino.stem}-{i}.wav")
         if origen.exists():
-            origen.rename(destino.with_name(f"{destino.stem}-{i + 1}.wav"))
+            fin = destino.with_name(f"{destino.stem}-{i + 1}.wav")
+            origen.rename(fin)
+            if origen.with_suffix(".json").exists():
+                origen.with_suffix(".json").rename(fin.with_suffix(".json"))
 
 
 # --------------------------------------------------------------------------- #
@@ -245,6 +271,31 @@ def _procesar(job: dict) -> None:
         p.unlink(missing_ok=True)
 
 
+def _calibrar(job: dict) -> None:
+    ref = REFS / job["ref"]
+    if not ref.exists():
+        raise ValueError(f"la referencia {job['ref']} ya no existe")
+    motor = obtener_motor(job.get("variante", "neutro"))
+    job.update(estado="generando", detalle="probando expresividad")
+
+    def cb(i: int, total: int, texto: str) -> None:
+        if job.get("cancelar"):
+            raise voz.Cancelado()
+        job["progreso"] = round(i / max(total, 1), 3)
+        job["detalle"] = f"{texto} ({i + 1} de {total})"
+
+    try:
+        r = voz.calibrar_referencia(motor, ref, job.get("lang", "es"), progreso=cb)
+    except voz.Cancelado:
+        job.update(estado="cancelado", detalle="cancelado por el usuario")
+        return
+
+    job["calibracion"] = r
+    job["progreso"] = 1.0
+    job["detalle"] = ""
+    guardar_meta(ref, exag=r["mejor"]["exag"], calibracion=r)
+
+
 def _worker() -> None:
     try:
         obtener_motor("neutro")
@@ -259,10 +310,15 @@ def _worker() -> None:
             continue
         t0 = time.time()
         try:
-            _procesar(job)
+            if job.get("tipo") == "calibracion":
+                _calibrar(job)
+            else:
+                _procesar(job)
             # _procesar puede haberlo cancelado: no pisar ese estado.
             if job["estado"] not in ("cancelado", "error"):
                 job.update(estado="listo", progreso=1.0, detalle="")
+        except voz.Cancelado:
+            job.update(estado="cancelado", detalle="cancelado por el usuario")
         except Exception as e:  # noqa: BLE001
             job.update(estado="error", error=str(e))
         finally:
@@ -288,6 +344,8 @@ def _worker_tx() -> None:
                 ),
             )
             job.update(estado="listo", progreso=1.0, detalle="", **r)
+        except voz.Cancelado:
+            job.update(estado="cancelado", detalle="cancelado por el usuario")
         except Exception as e:  # noqa: BLE001
             job.update(estado="error", error=str(e))
         finally:
@@ -309,6 +367,19 @@ app = FastAPI(title="ClonarVoz", docs_url=None, redoc_url=None)
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
+
+
+@app.get("/api/config")
+def api_config() -> dict:
+    return {
+        "exag": 0.4, "cfg": 0.5, "seed": 42, "lufs": -14.0,
+        "pausas": voz.PAUSAS,
+        "langs": LANGS,
+        "variantes": ["neutro", "argentina", "latam", "espana"],
+        "packs": {"latam": voz.pack_listo("latam"), "espana": voz.pack_listo("espana")},
+        "max_ref": voz.MAX_REF,
+        "tomas": TOMAS,
+    }
 
 
 @app.get("/api/estado")
@@ -339,7 +410,10 @@ async def subir_ref(archivo: UploadFile = File(...), nombre: str = Form("voz")) 
         if destino.exists():
             rotar_tomas(destino)
         nuevo.replace(destino)
-        return {"nombre": destino.name, "url": f"/files/refs/{destino.name}", **info}
+        analisis = voz.analizar_referencia(destino)
+        guardar_meta(destino, analisis=analisis)
+        return {"nombre": destino.name, "url": f"/files/refs/{destino.name}",
+                "analisis": analisis, **info}
     except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
     finally:
@@ -357,6 +431,53 @@ def crear_guion(body: dict) -> dict:
         )
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
+
+
+def _ruta_ref(nombre: str) -> Path:
+    ruta = REFS / Path(str(nombre)).name
+    if not ruta.exists() or ruta.suffix != ".wav":
+        raise HTTPException(404, "referencia no encontrada")
+    return ruta
+
+
+@app.post("/api/ref/analizar")
+def analizar_ref(body: dict) -> dict:
+    ruta = _ruta_ref(body.get("nombre", ""))
+    a = voz.analizar_referencia(ruta)
+    guardar_meta(ruta, analisis=a)
+    return a
+
+
+@app.post("/api/ref/calibrar")
+def calibrar_ref(body: dict) -> dict:
+    ruta = _ruta_ref(body.get("nombre", ""))
+    jid = uuid.uuid4().hex[:12]
+    TRABAJOS[jid] = {
+        "id": jid, "tipo": "calibracion", "estado": "en_cola", "progreso": 0.0,
+        "detalle": "en cola", "ref": ruta.name, "lang": body.get("lang", "es"),
+        "variante": body.get("variante", "neutro"), "resultados": [], "parciales": [],
+        "cancelar": False, "error": None, "creado": time.time(),
+    }
+    COLA.put(jid)
+    return {"job": jid}
+
+
+VIDEO_LOCK = threading.Lock()
+
+
+@app.post("/api/video")
+def api_video(body: dict) -> dict:
+    nombre = str(body.get("nombre", ""))
+    if not re.fullmatch(r"[a-z0-9-]+", nombre):
+        raise HTTPException(400, "nombre inválido")
+    mp3 = OUT / f"{nombre}.mp3"
+    if not mp3.exists():
+        raise HTTPException(404, "clip no encontrado")
+    srt = OUT / f"{nombre}.srt"
+    dst = OUT / f"{nombre}.mp4"
+    with VIDEO_LOCK:
+        info = voz.exportar_video(mp3, srt if srt.exists() else None, dst)
+    return {"nombre": nombre, "url": f"/files/salida/{dst.name}", "dur": info["dur"]}
 
 
 @app.post("/api/generar")
@@ -460,7 +581,7 @@ def api_trabajos() -> dict:
     ahora = time.time()
     salida = []
     for j in TRABAJOS.values():
-        if j.get("tipo") == "transcripcion":
+        if j.get("tipo") in ("transcripcion", "calibracion"):
             continue
         fin = j.get("fin") or j.get("creado", 0)
         activo = j.get("estado") in ("en_cola", "generando")
@@ -477,7 +598,7 @@ def api_trabajos() -> dict:
 def borrar(nombre: str) -> dict:
     if not re.fullmatch(r"[a-z0-9-]+", nombre):
         raise HTTPException(400, "nombre inválido")
-    for ext in (".mp3", ".srt", ".wav", ".json"):
+    for ext in (".mp3", ".srt", ".wav", ".json", ".mp4"):
         (OUT / f"{nombre}{ext}").unlink(missing_ok=True)
     return {"ok": True}
 

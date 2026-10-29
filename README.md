@@ -24,6 +24,7 @@ clips con su subtítulo y descargarlos. La CLI sigue disponible debajo.
 | Cómputo | **CPU** (6 hilos) | Tu GPU es una RX 580 (Polaris, gfx803): ROCm la dejó fuera de soporte y la Vega integrada (gfx90c) tampoco entra. Vulkan existe, pero ningún motor TTS serio lo aprovecha |
 | Runtime | **Python 3.11 en `.venv`** vía `uv` | El sistema tiene 3.14; torch, numba y compañía todavía no lo soportan. `--torch-backend=cpu` evita bajar 2.5 GB de wheels CUDA |
 | Audio | **ffmpeg** | Limpieza de referencia, loudness a −14 LUFS, MP3/AAC 48 kHz |
+| Video | **ffmpeg + libass** | MP4 1080x1920 con subtítulos quemados desde el SRT |
 | Guiones | **JSON versionado + manifiesto** | Cada clip es reproducible: mismo texto, misma semilla, mismo resultado |
 
 ### Rendimiento medido aquí
@@ -71,6 +72,10 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
 - **En vivo**: cada frase se publica apenas se sintetiza y se reproduce en
   streaming, antes de terminar el clip. Si no convence, **Cancelar** descarta
   todo y no guarda nada (corta al terminar la frase en curso, ~15 s).
+- **Calibrar**: prueba tres expresividades sobre tu referencia y elige la que
+  mejor conserva el tono. Se guarda por toma y se aplica sola al elegirla.
+- **Video 9:16**: desde la biblioteca, un clic convierte el MP3 y su SRT en un
+  MP4 vertical con los subtítulos quemados, listo para Reels o TikTok.
 - **Biblioteca**: reproductor, descarga del MP3 y del SRT, borrado.
 
 ### Variedades de español
@@ -236,6 +241,7 @@ ClonarVoz/
 ./voz guion "<tema>" [--objetivo] [--segundos]     guion base por consola
 ./voz transcribir <audio> [-o guion.json|.srt|.txt] audio a texto (Whisper base)
 ./voz packs [latam|espana]                          descargar packs de español
+pytest -q                                            tests de las piezas puras
 ./voz record [-o refs/mi-voz.wav] [--secs 12]       grabar referencia del micro
 ./voz prep <audio> [-o refs/mi-voz.wav] [--max 12]  limpiar referencia
 ./voz say "<texto>" [-o salida/x.mp3] [--srt]       un clip

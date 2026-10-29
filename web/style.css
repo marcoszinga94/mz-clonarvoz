@@ -186,6 +186,7 @@ kbd {
 .campo-h label, .campo > label { font-size: 12px; line-height: 16px; color: var(--muted); }
 .campo-h .mono { font-size: 12px; color: var(--text); }
 .campo-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+.campo-idioma { grid-template-columns: 1.35fr 0.65fr; }
 .campo-2 .campo + .campo { margin-top: 0; }
 
 .check {
@@ -483,3 +484,10 @@ textarea:hover { border-color: #3d3d3d; }
   animation: subir 400ms var(--ease) both;
 }
 .parcial.nueva { color: var(--accent); border-color: var(--accent); }
+
+/* ---------------------------------------------------------------- referencia */
+
+.btn-ancho-sm { width: 100%; margin-top: 8px; }
+#ref-veredicto.aviso { color: #f0c15c; }
+#ref-veredicto.malo { color: var(--danger); }
+#ref-veredicto.ok { color: var(--muted); }

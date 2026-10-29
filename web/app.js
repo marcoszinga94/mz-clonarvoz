@@ -38,7 +38,7 @@ async function api(path, opts) {
 const estado = {
   refs: [], motor: "cargando", job: null, timer: null, polling: null, grabando: null,
   colaDOM: new Map(), colaTimer: null, colaTerminados: 0, colaOcultos: new Set(),
-  jobActual: null, cancelando: new Set(),
+  jobActual: null, cancelando: new Set(), config: null,
 };
 
 function toast(msg, malo = false) {
@@ -110,11 +110,37 @@ function pintarRefAudio() {
   if (!ref) {
     audio.hidden = true;
     $("#ref-dur").textContent = "";
+    $("#btn-calibrar").hidden = true;
+    $("#ref-veredicto").hidden = true;
     return;
   }
   audio.hidden = false;
   audio.src = ref.url;
   $("#ref-dur").textContent = fmt(ref.dur);
+  $("#btn-calibrar").hidden = false;
+  pintarAnalisis(ref.analisis);
+  if (ref.exag != null) aplicarExag(ref.exag, false);
+}
+
+function pintarAnalisis(a) {
+  const el = $("#ref-veredicto");
+  if (!a) { el.hidden = true; return; }
+  const partes = [];
+  if (a.snr_db != null) partes.push(`SNR ${a.snr_db} dB`);
+  if (a.silencio_pct != null) partes.push(`${a.silencio_pct}% silencio`);
+  partes.push(`${a.dur}s`);
+  el.textContent = a.avisos && a.avisos.length
+    ? a.avisos.join(" · ")
+    : `Referencia en buen estado · ${partes.join(" · ")}`;
+  el.className = `pista ${a.veredicto || "ok"}`;
+  el.hidden = false;
+}
+
+function aplicarExag(valor, avisar) {
+  const v = Number(valor);
+  $("#exag").value = v;
+  $("#exag-val").textContent = v.toFixed(2);
+  if (avisar) toast(`Expresividad calibrada: ${v.toFixed(2)}`);
 }
 
 function pintarPack() {
@@ -459,6 +485,13 @@ function filaBiblioteca(c) {
       <div class="clip-m mono">${fmt(c.dur)} · ${cuando}</div>
     </div>
     <div class="clip-acc">
+      ${c.mp4
+        ? `<a class="icon-btn" href="${c.mp4}" download title="Descargar video 9:16" aria-label="Descargar video 9:16">
+             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m11 10.5 3 1.5-3 1.5z"/></svg>
+           </a>`
+        : `<button class="icon-btn" data-video="${c.nombre}" title="Crear video 9:16" aria-label="Crear video 9:16">
+             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m11 10.5 3 1.5-3 1.5z"/></svg>
+           </button>`}
       <a class="icon-btn" href="${c.mp3}" download title="Descargar MP3" aria-label="Descargar MP3">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1"/></svg>
       </a>
@@ -557,6 +590,79 @@ function conectarChips(sel, clave, numerico) {
     });
     guionUI[clave] = numerico ? Number(b.dataset.v) : b.dataset.v;
   });
+}
+
+// --------------------------------------------------------------- calibrar
+
+async function calibrar() {
+  const nombre = $("#select-voz").value;
+  if (!nombre) return;
+  const { lang, variante } = desglosarIdioma($("#lang").value);
+  prepararTrabajo("Calibrando la voz", "Probando expresividades");
+  $("#btn-calibrar").disabled = true;
+  try {
+    const r = await api("/api/ref/calibrar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre, lang, variante }),
+    });
+    seguirCalibracion(r.job);
+  } catch (e) {
+    $("#btn-calibrar").disabled = false;
+    $("#trabajo").hidden = true;
+    toast(String(e.message), true);
+  }
+}
+
+function seguirCalibracion(jobId) {
+  prepararTrabajo("Calibrando la voz", "Probando expresividades");
+  estado.jobActual = jobId;
+  $("#btn-cancelar-job").hidden = false;
+  $("#btn-cancelar-job").disabled = false;
+  clearTimeout(estado.polling);
+
+  const tick = async () => {
+    try {
+      const j = await api(`/api/job/${jobId}`);
+      $("#barra-fill").style.width = `${Math.max(2, Math.round(j.progreso * 100))}%`;
+      $("#trabajo-detalle").textContent = j.detalle || "";
+
+      if (j.estado === "listo" && j.calibracion) {
+        clearInterval(estado.timer);
+        clearTimeout(estado.polling);
+        $("#spin").hidden = true;
+        $("#btn-cancelar-job").hidden = true;
+        $("#btn-calibrar").disabled = false;
+        estado.jobActual = null;
+        const m = j.calibracion.mejor;
+        aplicarExag(m.exag, false);
+        $("#trabajo-titulo").textContent = "Voz calibrada";
+        $("#trabajo-detalle").textContent =
+          `Expresividad ${m.exag.toFixed(2)} · similitud ${m.sim} · tono ${m.f0} Hz (ref ${j.calibracion.f0_ref})`;
+        $("#barra-fill").style.width = "100%";
+        cargarEstado();
+        toast(`Calibrado: expresividad ${m.exag.toFixed(2)}`);
+        return;
+      }
+      if (j.estado === "cancelado" || j.estado === "error") {
+        clearInterval(estado.timer);
+        clearTimeout(estado.polling);
+        $("#spin").hidden = true;
+        $("#btn-cancelar-job").hidden = true;
+        $("#btn-calibrar").disabled = false;
+        estado.jobActual = null;
+        $("#trabajo-titulo").textContent = j.estado === "error" ? "No se pudo calibrar" : "Calibración cancelada";
+        $("#trabajo-detalle").textContent = j.error || "";
+        return;
+      }
+      estado.polling = setTimeout(tick, 1200);
+    } catch (e) {
+      clearInterval(estado.timer);
+      $("#btn-calibrar").disabled = false;
+      toast(String(e.message), true);
+    }
+  };
+  estado.polling = setTimeout(tick, 600);
 }
 
 // --------------------------------------------------------------- transcribir
@@ -680,8 +786,27 @@ $("#btn-limpiar-cola").addEventListener("click", () => {
 });
 $("#lista").addEventListener("click", (e) => {
   const b = e.target.closest("[data-borrar]");
-  if (b) borrar(b.dataset.borrar);
+  if (b) { borrar(b.dataset.borrar); return; }
+  const v = e.target.closest("[data-video]");
+  if (v) crearVideo(v.dataset.video, v);
 });
+
+async function crearVideo(nombre, boton) {
+  boton.disabled = true;
+  toast("Generando video 9:16…");
+  try {
+    const r = await api("/api/video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre }),
+    });
+    toast(`Video listo · ${fmt(r.dur)}`);
+    cargarBiblioteca();
+  } catch (e) {
+    toast(String(e.message), true);
+    boton.disabled = false;
+  }
+}
 
 $("#btn-cancelar-job").addEventListener("click", async () => {
   const id = estado.jobActual;
@@ -696,6 +821,7 @@ $("#btn-cancelar-job").addEventListener("click", async () => {
   }
 });
 
+$("#btn-calibrar").addEventListener("click", calibrar);
 $("#btn-guion").addEventListener("click", abrirGuion);
 $("#btn-transcribir").addEventListener("click", () => $("#file-tx").click());
 $("#file-tx").addEventListener("change", (ev) => {
@@ -722,10 +848,16 @@ conectarChips("#gobj", "objetivo", false);
 conectarChips("#gseg", "segundos", true);
 
 $("#btn-reset").addEventListener("click", () => {
-  $("#exag").value = 0.4; $("#exag-val").textContent = "0.40";
-  $("#cfg").value = 0.5; $("#cfg-val").textContent = "0.50";
-  $("#seed").value = 42; $("#lang").value = "es";
-  $("#pausa-frase").value = 180; $("#pausa-coma").value = 90; $("#pausa-parrafo").value = 300;
+  const c = estado.config || { exag: 0.4, cfg: 0.5, seed: 42 };
+  aplicarExag(c.exag, false);
+  $("#cfg").value = c.cfg; $("#cfg-val").textContent = Number(c.cfg).toFixed(2);
+  $("#seed").value = c.seed; $("#lang").value = "es";
+  if (c.pausas) {
+    ["frase", "coma", "parrafo"].forEach((k) => {
+      const el = document.getElementById(`pausa-${k}`);
+      if (el) el.value = Math.round((c.pausas[k] ?? 0) * 1000);
+    });
+  }
   $("#silencio-max").value = 350;
   $("#cortar-comas").checked = false; $("#recorte").value = "1";
 });
@@ -751,8 +883,28 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// --------------------------------------------------------------- config
+
+async function cargarConfig() {
+  try {
+    const c = await api("/api/config");
+    estado.config = c;
+    aplicarExag(c.exag, false);
+    $("#cfg").value = c.cfg;
+    $("#cfg-val").textContent = Number(c.cfg).toFixed(2);
+    $("#seed").value = c.seed;
+    if (c.pausas) {
+      ["frase", "coma", "parrafo"].forEach((k) => {
+        const el = document.getElementById(`pausa-${k}`);
+        if (el) el.value = Math.round((c.pausas[k] ?? 0) * 1000);
+      });
+    }
+  } catch (_) {}
+}
+
 // --------------------------------------------------------------- inicio
 
+cargarConfig();
 cargarEstado();
 cargarBiblioteca();
 refrescarCola();

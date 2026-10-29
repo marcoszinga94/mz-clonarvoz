@@ -15,3 +15,6 @@ python-multipart
 
 # Transcripción (Whisper base en CPU)
 faster-whisper
+
+# Tests
+pytest
