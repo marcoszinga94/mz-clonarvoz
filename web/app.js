@@ -273,7 +273,38 @@ async function generar() {
   }
 }
 
+function reiniciarStream() {
+  const a = $("#stream-audio");
+  a.pause();
+  a.removeAttribute("src");
+  a.hidden = true;
+  stream.cola = [];
+  stream.vistos = 0;
+  $("#parciales").innerHTML = "";
+  $("#parciales").hidden = true;
+  $("#btn-cancelar-job").hidden = true;
+}
+
+function siguienteAudio() {
+  const url = stream.cola.shift();
+  const a = $("#stream-audio");
+  if (!url) return;
+  a.src = url;
+  a.hidden = false;
+  a.play().catch(() => {});
+}
+
+function encolarAudio(url) {
+  stream.cola.push(url);
+  if ($("#stream-audio").paused) siguienteAudio();
+}
+
+$("#stream-audio").addEventListener("ended", () => {
+  if (stream.cola.length) siguienteAudio();
+});
+
 function prepararTrabajo(titulo, detalle) {
+  reiniciarStream();
   $("#trabajo").hidden = false;
   $("#trabajo-titulo").textContent = titulo;
   $("#trabajo-detalle").textContent = detalle;
@@ -536,6 +567,7 @@ async function transcribirArchivo(file) {
 
 function seguirTranscripcion(jobId) {
   prepararTrabajo("Transcribiendo", "Preparando modelo");
+  estado.jobActual = jobId;
   clearTimeout(estado.polling);
 
   const tick = async () => {
@@ -548,6 +580,11 @@ function seguirTranscripcion(jobId) {
         clearInterval(estado.timer);
         clearTimeout(estado.polling);
         $("#spin").hidden = true;
+        $("#btn-cancelar-job").hidden = true;
+        $("#stream-audio").pause();
+        $("#stream-audio").hidden = true;
+        stream.cola = [];
+        estado.jobActual = null;
         $("#trabajo-titulo").textContent = "Transcripción lista";
         $("#trabajo-detalle").textContent =
           `${j.lineas.length} frase${j.lineas.length === 1 ? "" : "s"} · ${fmt(j.dur)} · ${j.idioma}`;
@@ -611,6 +648,19 @@ $("#btn-limpiar-cola").addEventListener("click", () => {
 $("#lista").addEventListener("click", (e) => {
   const b = e.target.closest("[data-borrar]");
   if (b) borrar(b.dataset.borrar);
+});
+
+$("#btn-cancelar-job").addEventListener("click", async () => {
+  const id = estado.jobActual;
+  if (!id) return;
+  $("#btn-cancelar-job").disabled = true;
+  try {
+    await api(`/api/job/${id}/cancelar`, { method: "POST" });
+    $("#trabajo-detalle").textContent = "Cancelando…";
+  } catch (e) {
+    toast(String(e.message), true);
+    $("#btn-cancelar-job").disabled = false;
+  }
 });
 
 $("#btn-guion").addEventListener("click", abrirGuion);

@@ -68,6 +68,9 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
   *Cortar en cada coma*.
 - **Cola**: una generación a la vez (la CPU manda), con progreso por frase y
   resultados que aparecen a medida que terminan.
+- **En vivo**: cada frase se publica apenas se sintetiza y se reproduce en
+  streaming, antes de terminar el clip. Si no convence, **Cancelar** descarta
+  todo y no guarda nada (corta al terminar la frase en curso, ~15 s).
 - **Biblioteca**: reproductor, descarga del MP3 y del SRT, borrado.
 
 ### Variedades de español

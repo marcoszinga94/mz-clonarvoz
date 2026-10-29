@@ -483,12 +483,17 @@ def partir_frases(texto: str, max_chars: int = 180) -> list[str]:
     return [t for t, _ in partir_trozos(texto, max_chars)]
 
 
+class Cancelado(Exception):
+    """Se lanza cuando el usuario cancela una generación en curso."""
+
+
 def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                exag: float, cfg: float, seed: int, progreso=None,
                variante: str = "neutro", pausas: dict | None = None,
                cortar_comas: bool = False,
                recortar: bool = True,
-               silencio_max_ms: int = 350) -> tuple["object", list[str], list[float]]:
+               silencio_max_ms: int = 350,
+               al_trozo=None, cancelado=None) -> tuple["object", list[str], list[float]]:
     """Genera por trozos y concatena. Devuelve (wav, frases, duraciones)."""
     torch = motor.torch
     ajustes = normalizar_pausas(pausas)
@@ -496,6 +501,8 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
     partes, duraciones, frases = [], [], []
 
     for i, (trozo, nivel) in enumerate(trozos):
+        if cancelado and cancelado():
+            raise Cancelado()
         if progreso:
             progreso(i, len(trozos), trozo)
         esperado = len(trozo) / 15.0  # ~15 car/s de habla
@@ -513,6 +520,9 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                   file=sys.stderr)
         else:
             print(f"  ⚠ frase problemática, se usa igual: {trozo[:60]!r}", file=sys.stderr)
+
+        if al_trozo:
+            al_trozo(i, len(trozos), wav, trozo)
 
         frases.append(trozo)
         partes.append(wav)

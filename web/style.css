@@ -461,3 +461,20 @@ textarea:hover { border-color: #3d3d3d; }
 @media (max-width: 520px) {
   .acciones { flex-direction: column; align-items: flex-end; gap: 4px; }
 }
+
+/* ---------------------------------------------------------------- streaming */
+
+.btn-mini { min-height: 32px; padding: 4px 12px; font-size: 12px; }
+.btn-mini:disabled { opacity: 0.5; }
+
+.parciales {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px;
+}
+.parcial {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px; line-height: 16px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 2px 8px;
+  animation: subir 400ms var(--ease) both;
+}
+.parcial.nueva { color: var(--accent); border-color: var(--accent); }

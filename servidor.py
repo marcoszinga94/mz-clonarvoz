@@ -157,6 +157,10 @@ def _procesar(job: dict) -> None:
     if ref is not None and not ref.exists():
         raise ValueError(f"la referencia {job['ref']} ya no existe")
 
+    for viejo in OUT.glob(".parcial-*.wav"):
+        if time.time() - viejo.stat().st_mtime > 1800:
+            viejo.unlink(missing_ok=True)
+
     items = job["items"]
     n = len(items)
     variante = job.get("variante", "neutro")
@@ -172,13 +176,30 @@ def _procesar(job: dict) -> None:
             job["progreso"] = round((k + i / max(total, 1)) / n, 3)
             job["detalle"] = f"clip {k + 1} de {n} · frase {min(i + 1, total)} de {total}"
 
-        wav, frases, durs = voz.sintetizar(
-            motor, it["texto"], ref, job["lang"], job["exag"], job["cfg"],
-            job["seed"] + k * 101, progreso=cb, variante=variante,
-            pausas=job.get("pausas"), cortar_comas=job.get("cortar_comas", False),
-            recortar=job.get("recortar_silencio", True),
-            silencio_max_ms=job.get("silencio_max_ms", 350),
-        )
+        def cb_trozo(i: int, total: int, wav, frase: str, k: int = k) -> None:
+            archivo = OUT / f".parcial-{job['id']}-{k}-{i}.wav"
+            ta.save(str(archivo), wav.unsqueeze(0), motor.sr)
+            job["parciales"].append({
+                "n": len(job["parciales"]) + 1,
+                "url": f"/files/salida/{archivo.name}",
+                "dur": round(wav.shape[-1] / motor.sr, 2),
+                "texto": frase[:90],
+            })
+
+        try:
+            wav, frases, durs = voz.sintetizar(
+                motor, it["texto"], ref, job["lang"], job["exag"], job["cfg"],
+                job["seed"] + k * 101, progreso=cb, variante=variante,
+                pausas=job.get("pausas"), cortar_comas=job.get("cortar_comas", False),
+                recortar=job.get("recortar_silencio", True),
+                silencio_max_ms=job.get("silencio_max_ms", 350),
+                al_trozo=cb_trozo, cancelado=lambda: bool(job.get("cancelar")),
+            )
+        except voz.Cancelado:
+            for p in OUT.glob(f".parcial-{job['id']}-*.wav"):
+                p.unlink(missing_ok=True)
+            job.update(estado="cancelado", detalle="cancelado por el usuario", parciales=[])
+            return
 
         base = f"{slug(it['nombre'])}-{uuid.uuid4().hex[:4]}"
         wav_path = OUT / f"{base}.wav"
@@ -216,6 +237,9 @@ def _procesar(job: dict) -> None:
         })
         job["progreso"] = round((k + 1) / n, 3)
 
+    for p in OUT.glob(f".parcial-{job['id']}-*.wav"):
+        p.unlink(missing_ok=True)
+
 
 def _worker() -> None:
     try:
@@ -232,7 +256,9 @@ def _worker() -> None:
         t0 = time.time()
         try:
             _procesar(job)
-            job.update(estado="listo", progreso=1.0, detalle="")
+            # _procesar puede haberlo cancelado: no pisar ese estado.
+            if job["estado"] not in ("cancelado", "error"):
+                job.update(estado="listo", progreso=1.0, detalle="")
         except Exception as e:  # noqa: BLE001
             job.update(estado="error", error=str(e))
         finally:
@@ -361,6 +387,8 @@ def generar(body: dict) -> dict:
         "recortar_silencio": bool(body.get("recortar_silencio", True)),
         "silencio_max_ms": int(body.get("silencio_max_ms", 350)),
         "resultados": [],
+        "parciales": [],
+        "cancelar": False,
         "error": None,
         "creado": time.time(),
     }
@@ -388,6 +416,17 @@ async def api_transcribir(archivo: UploadFile = File(...), lang: str = Form("es"
     }
     COLA_TX.put(jid)
     return {"job": jid, "estado": "en_cola"}
+
+
+@app.post("/api/job/{jid}/cancelar")
+def cancelar(jid: str) -> dict:
+    j = TRABAJOS.get(jid)
+    if not j:
+        raise HTTPException(404, "trabajo no encontrado")
+    if j["estado"] in ("listo", "error", "cancelado"):
+        return {"ok": False, "estado": j["estado"]}
+    j["cancelar"] = True
+    return {"ok": True, "estado": j["estado"]}
 
 
 @app.get("/api/job/{jid}")
