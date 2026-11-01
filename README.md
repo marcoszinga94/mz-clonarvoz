@@ -241,7 +241,31 @@ permisiva. Eso es lo que hace viable publicar y monetizar sin letra pequeña.
 
 ---
 
-## 6. Estructura
+## 6. Servicio (arranca solo)
+
+La app corre como servicio de usuario: arranca al iniciar sesión, se reinicia si
+falla y sobrevive a un reboot sin que tengas que lanzarla a mano.
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/clonarvoz.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now clonarvoz
+loginctl enable-linger $USER      # arranca incluso sin sesión abierta
+```
+
+El archivo de `deploy/` tiene las rutas de este equipo; si movés el proyecto,
+actualizá `WorkingDirectory` y `ExecStart`.
+
+Estado persistido en `.estado/`:
+
+| Archivo | Qué guarda |
+|---|---|
+| `cola.json` | trabajos pendientes o en curso (se reanudan al arrancar) |
+| `ajustes.json` | motor y toma elegidos (se restauran al abrir la app) |
+| `trabajos.json` | últimos 20 trabajos terminados |
+
+## 7. Estructura
 
 ```
 ClonarVoz/
@@ -261,7 +285,7 @@ ClonarVoz/
     └── modelos-y-licencias.md
 ```
 
-## 7. Comandos
+## 8. Comandos
 
 ```
 ./app [puerto]                                      app visual (def. 8000)
@@ -283,7 +307,7 @@ Pausas: `--pausa-frase 180`, `--pausa-coma 90`, `--pausa-parrafo 300` (ms),
 
 ---
 
-## 8. Ética y cumplimiento
+## 9. Ética y cumplimiento
 
 - Clona **tu** voz o una voz con consentimiento escrito. Lo demás es suplantación.
 - Etiqueta el audio como generado por IA cuando la plataforma lo permita.

@@ -1,0 +1,14 @@
+[Unit]
+Description=ClonarVoz (estudio de voz local)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/zinike/Proyectos/ClonarVoz
+ExecStart=/home/zinike/Proyectos/ClonarVoz/.venv/bin/python -m uvicorn servidor:app --host 127.0.0.1 --port 8000 --log-level warning
+Restart=on-failure
+RestartSec=5
+Environment=NO_OPEN=1
+
+[Install]
+WantedBy=default.target

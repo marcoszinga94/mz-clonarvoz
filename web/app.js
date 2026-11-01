@@ -117,6 +117,44 @@ function aplicarSinRef(sin) {
 
 let _refsFirma = "";
 
+let ajustesListos = false;
+
+async function cargarAjustes() {
+  try {
+    estado.ajustes = await api("/api/ajustes");
+  } catch (_) {
+    estado.ajustes = {};
+  }
+  ajustesListos = true;
+  aplicarAjustes();
+}
+
+function aplicarAjustes() {
+  if (!ajustesListos) return;
+  const m = estado.ajustes.motor;
+  const sel = $("#motor");
+  const op = m ? sel.querySelector(`option[value="${m}"]`) : null;
+  if (op && !op.disabled) {
+    sel.value = m;
+    aplicarMotor();
+  }
+  const guardada = estado.ajustes.ref;
+  if (guardada && estado.refs.some((r) => r.nombre === guardada) && $("#select-voz").value !== guardada) {
+    _refsFirma = "";          // fuerza el repintado del selector
+    pintarRefs(estado.refs);
+  }
+}
+
+async function guardarAjustes() {
+  try {
+    await api("/api/ajustes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ motor: $("#motor").value, ref: $("#select-voz").value || null }),
+    });
+  } catch (_) {}
+}
+
 function pintarRefs(refs) {
   estado.refs = refs;
 
@@ -142,7 +180,9 @@ function pintarRefs(refs) {
     });
     const conNota = refs.filter((r) => r.nota != null);
     const mejor = conNota.length ? conNota.reduce((a, b) => (b.nota > a.nota ? b : a)) : refs[0];
-    const elegido = refs.find((r) => r.nombre === antes) || mejor;
+    const guardada = ajustesListos && estado.ajustes.ref
+      ? refs.find((r) => r.nombre === estado.ajustes.ref) : null;
+    const elegido = refs.find((r) => r.nombre === antes) || guardada || mejor;
     sel.value = elegido.nombre;
   }
   pintarRefAudio();
@@ -835,8 +875,8 @@ $("#file").addEventListener("change", async (ev) => {
   ev.target.value = "";
 });
 
-$("#select-voz").addEventListener("change", pintarRefAudio);
-$("#motor").addEventListener("change", aplicarMotor);
+$("#select-voz").addEventListener("change", () => { pintarRefAudio(); guardarAjustes(); });
+$("#motor").addEventListener("change", () => { aplicarMotor(); guardarAjustes(); });
 $("#guion").addEventListener("input", actualizarContador);
 $("#btn-generar").addEventListener("click", generar);
 $("#cola").addEventListener("click", async (e) => {
@@ -945,6 +985,7 @@ document.addEventListener("keydown", (e) => {
 
 // --------------------------------------------------------------- inicio
 
+cargarAjustes();
 cargarEstado();
 cargarBiblioteca();
 refrescarCola();

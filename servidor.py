@@ -47,6 +47,55 @@ COLA_LOCK = threading.Lock()
 ESTADO_DIR = ROOT / ".estado"
 ESTADO_DIR.mkdir(exist_ok=True)
 COLA_FILE = ESTADO_DIR / "cola.json"
+AJUSTES_FILE = ESTADO_DIR / "ajustes.json"
+HISTORIAL_FILE = ESTADO_DIR / "trabajos.json"
+HISTORIAL_MAX = 20
+
+
+def _leer_json(ruta: Path, por_defecto):
+    try:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return por_defecto
+
+
+def _escribir_json(ruta: Path, datos) -> None:
+    tmp = ruta.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(ruta)
+    except OSError:
+        pass
+
+
+def cargar_ajustes() -> dict:
+    d = _leer_json(AJUSTES_FILE, {})
+    return {"motor": d.get("motor", "chatterbox"), "ref": d.get("ref")}
+
+
+def guardar_ajustes(datos: dict) -> dict:
+    actual = cargar_ajustes()
+    if datos.get("motor") in ("chatterbox", "openvoice"):
+        actual["motor"] = datos["motor"]
+    if "ref" in datos:
+        nombre = Path(str(datos["ref"] or "")).name
+        actual["ref"] = nombre if (REFS / nombre).exists() else None
+    _escribir_json(AJUSTES_FILE, actual)
+    return actual
+
+
+def registrar_historial(job: dict) -> None:
+    """Guarda los trabajos terminados para que sobrevivan al reinicio."""
+    if job.get("tipo") in ("transcripcion", "calibracion", "evaluacion"):
+        return
+    historial = _leer_json(HISTORIAL_FILE, [])
+    compacto = {k: v for k, v in job.items()
+                if k in ("id", "estado", "motor", "ref", "creado", "fin",
+                         "segundos", "resultados", "n_items", "error", "tipo")}
+    historial = [h for h in historial if h.get("id") != job.get("id")]
+    historial.append(compacto)
+    historial = sorted(historial, key=lambda h: h.get("fin") or h.get("creado") or 0)[-HISTORIAL_MAX:]
+    _escribir_json(HISTORIAL_FILE, historial)
 COLA_TX: queue.Queue[str] = queue.Queue()
 _DUR_CACHE: dict[str, tuple[float, float]] = {}
 
@@ -418,6 +467,7 @@ def _worker() -> None:
             job["segundos"] = round(time.time() - t0, 1)
             job["fin"] = time.time()
             guardar_cola()
+            registrar_historial(job)
 
 
 def _worker_tx() -> None:
@@ -708,6 +758,16 @@ def api_historial() -> dict:
     return {"clips": historial()}
 
 
+@app.get("/api/ajustes")
+def api_ajustes() -> dict:
+    return cargar_ajustes()
+
+
+@app.post("/api/ajustes")
+def api_guardar_ajustes(body: dict) -> dict:
+    return guardar_ajustes(body or {})
+
+
 @app.get("/api/trabajos")
 def api_trabajos() -> dict:
     """Cola de generación: los activos y los terminados en los últimos 10 min.
@@ -727,6 +787,17 @@ def api_trabajos() -> dict:
         d = {k: v for k, v in j.items() if k not in ("items", "ruta")}
         d["n_items"] = len(j.get("items") or [])
         salida.append(d)
+    vistos = {j.get("id") for j in salida}
+    for h in _leer_json(HISTORIAL_FILE, []):
+        if h.get("id") in vistos:
+            continue
+        fin = h.get("fin") or h.get("creado", 0)
+        if ahora - fin > 6 * 3600:
+            continue
+        h = dict(h)
+        h["n_items"] = h.get("n_items") or 0
+        salida.append(h)
+
     salida.sort(key=lambda j: j.get("creado", 0))
     return {"trabajos": salida, "cola": COLA.qsize()}
 
