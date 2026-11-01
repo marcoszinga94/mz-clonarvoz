@@ -21,6 +21,7 @@ clips con su subtítulo y descargarlos. La CLI sigue disponible debajo.
 |---|---|---|
 | Transcripción | **Whisper base** vía `faster-whisper` (int8 en CPU) | Mismas pesas MIT, ~6× más rápido que tiempo real en este equipo |
 | Motor TTS | **Chatterbox Multilingual V3** (0.5B, Resemble AI) | Pesos abiertos **MIT** (uso comercial sin restricciones), clonación zero-shot con 5–10 s de audio, español nativo (es / es-mx) |
+| Motor alternativo | **OpenVoice V2** + MeloTTS (MyShell, MIT) | Se elige en Ajustes. Convierte el timbre de la referencia sobre una base MeloTTS española: ~1,7× tiempo real en CPU contra ~27× de Chatterbox en este equipo. Solo español |
 | Cómputo | **CPU** (6 hilos) | Tu GPU es una RX 580 (Polaris, gfx803): ROCm la dejó fuera de soporte y la Vega integrada (gfx90c) tampoco entra. Vulkan existe, pero ningún motor TTS serio lo aprovecha |
 | Runtime | **Python 3.11 en `.venv`** vía `uv` | El sistema tiene 3.14; torch, numba y compañía todavía no lo soportan. `--torch-backend=cpu` evita bajar 2.5 GB de wheels CUDA |
 | Audio | **ffmpeg** | Limpieza de referencia, loudness a −14 LUFS, MP3/AAC 48 kHz |
@@ -61,12 +62,30 @@ tu equipo: ni el audio, ni el texto, ni las peticiones.
   entretener, contar una historia) y duración (15, 30 o 60 s). Devuelve un guion
   de 3 a 8 líneas listo para editar. Es plantilla, no modelo: instantáneo y sin
   descargar nada más. "Otra versión" rota las plantillas para variar el ángulo.
-- **Ajustes**: expresividad, apego al texto, idioma, semilla y pausas. En español
-  hay cuatro variedades: neutro, **argentino**, LatAm y España. Las pausas se
-  controlan por separado (frase, coma, párrafo, en ms), más un **silencio máximo**
-  que acorta las que inventa el modelo y un recorte del silencio de borde de cada
-  trozo. Si querés que la coma también sea un punto de corte, activá
-  *Cortar en cada coma*.
+- **Modo clon**: la única elección es el motor. Todo lo demás (expresividad,
+  pausas, acento, fidelidad) sale del análisis y la calibración de la toma, así
+  que el resultado siempre parte de tu voz y no de una voz genérica. **Sin
+  referencia no se genera**: el servidor rechaza el pedido.
+
+### Motores de clonación
+
+En Ajustes se elige con qué motor generar; no se sustituye uno por otro:
+
+| Motor | Idiomas | Expresividad | Velocidad (este equipo) |
+|---|---|---|---|
+| **Chatterbox** (default) | 23 idiomas + packs es | `exag` / `cfg` | ~27× tiempo real |
+| **OpenVoice V2** | español | no aplica | **~1,7× tiempo real** |
+
+OpenVoice V2 combina **MeloTTS** (texto → voz) con su **conversor de timbre**:
+la prosodia sale de MeloTTS y el timbre de tu referencia. Es mucho más rápido en
+CPU, pero la expresividad es más plana y solo habla español. Chatterbox sigue
+siendo el que mejor imita el ritmo y la emoción.
+
+Los pesos van en `models/melotts-es/` y `models/openvoice-v2/` (no se versionan).
+Si faltan, la opción aparece deshabilitada en la UI. Dependencias: `melotts`,
+`openvoice` (MyShell), `gruut[es]`, `wavmark`, `pydub`, `eng_to_ipa`, `langid`,
+`jieba`, `pypinyin`, `cn2an`, `g2p_en`, `fugashi`, `unidic-lite`, `mecab-python3`,
+`cached_path`.
 - **Cola**: una generación a la vez (la CPU manda), con progreso por frase y
   resultados que aparecen a medida que terminan. Los trabajos pendientes se
   guardan en `.estado/cola.json` y se reanudan si reinicias el servidor.

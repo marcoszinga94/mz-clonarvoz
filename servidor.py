@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import guiones
+import motor_openvoice
 import voz
 
 ROOT = Path(__file__).resolve().parent
@@ -48,16 +49,6 @@ ESTADO_DIR.mkdir(exist_ok=True)
 COLA_FILE = ESTADO_DIR / "cola.json"
 COLA_TX: queue.Queue[str] = queue.Queue()
 _DUR_CACHE: dict[str, tuple[float, float]] = {}
-
-LANGS = {
-    "es": "Español",
-    "es-AR": "Español AR",
-    "es-419": "Español LatAm",
-    "es-ES": "Español ES",
-    "en": "Inglés", "pt": "Portugués", "fr": "Francés",
-    "de": "Alemán", "it": "Italiano", "ja": "Japonés", "ko": "Coreano",
-    "zh": "Chino", "hi": "Hindi", "ar": "Árabe", "ru": "Ruso",
-}
 
 
 # --------------------------------------------------------------------------- #
@@ -99,6 +90,8 @@ def historial() -> list[dict]:
             "srt": f"/files/salida/{p.stem}.srt" if p.with_suffix(".srt").exists() else None,
             "mp4": f"/files/salida/{p.stem}.mp4" if p.with_suffix(".mp4").exists() else None,
             "dur": round(duracion(p), 2),
+            "motor": meta.get("motor") or "chatterbox",
+            "variante": meta.get("variante") or "neutro",
             "mtime": p.stat().st_mtime,
         })
     return salida
@@ -133,6 +126,7 @@ def refs_disponibles() -> list[dict]:
          "url": f"/files/refs/{p.name}", "mtime": p.stat().st_mtime,
          "analisis": meta_ref(p).get("analisis"),
          "exag": meta_ref(p).get("exag"),
+         "tau": meta_ref(p).get("tau"),
          "nota": meta_ref(p).get("nota")}
         for p in archivos
     ]
@@ -159,6 +153,13 @@ def rotar_tomas(destino: Path) -> None:
 
 MOTORES: "OrderedDict[str, object]" = OrderedDict()
 
+# Motores de clonación disponibles. "chatterbox" es el default histórico;
+# "openvoice" es MeloTTS + OpenVoice V2 (solo español, más liviano en CPU).
+MOTORES_DISPONIBLES = {
+    "chatterbox": lambda: True,
+    "openvoice": lambda: motor_openvoice.disponible(),
+}
+
 
 def clave_motor(variante: str) -> str:
     if variante in ("latam", "argentina"):
@@ -168,14 +169,25 @@ def clave_motor(variante: str) -> str:
     return "neutro"
 
 
-def obtener_motor(variante: str):
-    """Carga (y cachea) el modelo de la variante pedida. Máximo 2 en memoria."""
-    variante = clave_motor(variante)
-    if variante in MOTORES:
-        MOTORES.move_to_end(variante)
-        return MOTORES[variante]
-    motor = voz.Motor(HILOS, variante)
-    MOTORES[variante] = motor
+def obtener_motor(variante: str, nombre: str = "chatterbox"):
+    """Carga (y cachea) el modelo pedido. Máximo 2 en memoria."""
+    if nombre not in MOTORES_DISPONIBLES:
+        raise ValueError(f"motor desconocido: {nombre}")
+
+    if nombre == "openvoice":
+        clave = "openvoice:es"      # MeloTTS solo tiene español instalado
+        if clave in MOTORES:
+            MOTORES.move_to_end(clave)
+            return MOTORES[clave]
+        motor = motor_openvoice.MotorOpenVoice(HILOS)
+    else:
+        clave = f"chatterbox:{clave_motor(variante)}"
+        if clave in MOTORES:
+            MOTORES.move_to_end(clave)
+            return MOTORES[clave]
+        motor = voz.Motor(HILOS, clave_motor(variante))
+
+    MOTORES[clave] = motor
     while len(MOTORES) > 2:
         MOTORES.popitem(last=False)
     return motor
@@ -236,11 +248,15 @@ def _procesar(job: dict) -> None:
     items = job["items"]
     n = len(items)
     variante = job.get("variante", "neutro")
-    # Cargar otro pack tarda ~1 min: se informa en vez de dejar el trabajo "en cola".
-    if clave_motor(variante) not in MOTORES:
+    motor_nombre = job.get("motor", "chatterbox")
+    # Cargar un modelo tarda ~1 min: se informa en vez de dejar el trabajo "en cola".
+    clave = "openvoice:es" if motor_nombre == "openvoice" else f"chatterbox:{clave_motor(variante)}"
+    if clave not in MOTORES:
         job["estado"] = "generando"
-        job["detalle"] = "cargando el pack de español (solo la primera vez)"
-    motor = obtener_motor(variante)
+        job["detalle"] = ("cargando OpenVoice (solo la primera vez)"
+                          if motor_nombre == "openvoice"
+                          else "cargando el pack de español (solo la primera vez)")
+    motor = obtener_motor(variante, motor_nombre)
     job["estado"] = "generando"
 
     for k, it in enumerate(items):
@@ -266,6 +282,7 @@ def _procesar(job: dict) -> None:
                 recortar=job.get("recortar_silencio", True),
                 silencio_max_ms=job.get("silencio_max_ms", 350),
                 al_trozo=cb_trozo, cancelado=lambda: bool(job.get("cancelar")),
+                extra={"tau": float(job.get("tau", 0.15))} if motor_nombre == "openvoice" else None,
             )
         except voz.Cancelado:
             for p in OUT.glob(f".parcial-{job['id']}-*.wav"):
@@ -289,6 +306,7 @@ def _procesar(job: dict) -> None:
             "texto": it["texto"],
             "lang": job["lang"],
             "variante": job.get("variante", "neutro"),
+            "motor": job.get("motor", "chatterbox"),
             "exag": job["exag"],
             "cfg": job["cfg"],
             "seed": job["seed"] + k * 101,
@@ -297,6 +315,7 @@ def _procesar(job: dict) -> None:
             "cortar_comas": job.get("cortar_comas", False),
             "recortar_silencio": job.get("recortar_silencio", True),
             "silencio_max_ms": job.get("silencio_max_ms", 350),
+            "tau": job.get("tau"),
             "creado": time.time(),
         }, ensure_ascii=False), encoding="utf-8")
 
@@ -317,8 +336,9 @@ def _calibrar(job: dict) -> None:
     ref = REFS / job["ref"]
     if not ref.exists():
         raise ValueError(f"la referencia {job['ref']} ya no existe")
-    motor = obtener_motor(job.get("variante", "neutro"))
-    job.update(estado="generando", detalle="probando expresividad")
+    motor_nombre = job.get("motor", "chatterbox")
+    motor = obtener_motor(job.get("variante", "neutro"), motor_nombre)
+    job.update(estado="generando", detalle="probando ajustes")
 
     def cb(i: int, total: int, texto: str) -> None:
         if job.get("cancelar"):
@@ -327,7 +347,10 @@ def _calibrar(job: dict) -> None:
         job["detalle"] = f"{texto} ({i + 1} de {total})"
 
     try:
-        r = voz.calibrar_referencia(motor, ref, job.get("lang", "es"), progreso=cb)
+        if motor_nombre == "openvoice":
+            r = voz.calibrar_openvoice(motor, ref, job.get("lang", "es"), progreso=cb)
+        else:
+            r = voz.calibrar_referencia(motor, ref, job.get("lang", "es"), progreso=cb)
     except voz.Cancelado:
         job.update(estado="cancelado", detalle="cancelado por el usuario")
         return
@@ -335,7 +358,10 @@ def _calibrar(job: dict) -> None:
     job["calibracion"] = r
     job["progreso"] = 1.0
     job["detalle"] = ""
-    guardar_meta(ref, exag=r["mejor"]["exag"], calibracion=r)
+    if motor_nombre == "openvoice":
+        guardar_meta(ref, tau=r["mejor"]["tau"], calibracion=r)
+    else:
+        guardar_meta(ref, exag=r["mejor"]["exag"], calibracion=r)
 
 
 def _evaluar(job: dict) -> None:
@@ -373,6 +399,7 @@ def _worker() -> None:
         if not job:
             continue
         t0 = time.time()
+        job["inicio"] = t0  # el cronómetro corre desde que empieza, no desde la cola
         try:
             if job.get("tipo") == "calibracion":
                 _calibrar(job)
@@ -457,19 +484,6 @@ def index() -> HTMLResponse:
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/api/config")
-def api_config() -> dict:
-    return {
-        "exag": 0.4, "cfg": 0.5, "seed": 42, "lufs": -14.0,
-        "pausas": voz.PAUSAS,
-        "langs": LANGS,
-        "variantes": ["neutro", "argentina", "latam", "espana"],
-        "packs": {"latam": voz.pack_listo("latam"), "espana": voz.pack_listo("espana")},
-        "max_ref": voz.MAX_REF,
-        "tomas": TOMAS,
-    }
-
-
 @app.get("/api/estado")
 def estado() -> dict:
     return {
@@ -477,8 +491,7 @@ def estado() -> dict:
         "detalle": ESTADO["detalle"],
         "error": ESTADO["error"],
         "refs": refs_disponibles(),
-        "idiomas": LANGS,
-        "packs": {"latam": voz.pack_listo("latam"), "espana": voz.pack_listo("espana")},
+        "motores": {nombre: listo() for nombre, listo in MOTORES_DISPONIBLES.items()},
         "cola": COLA.qsize(),
     }
 
@@ -543,7 +556,9 @@ def calibrar_ref(body: dict) -> dict:
     TRABAJOS[jid] = {
         "id": jid, "tipo": "calibracion", "estado": "en_cola", "progreso": 0.0,
         "detalle": "en cola", "ref": ruta.name, "lang": body.get("lang", "es"),
-        "variante": body.get("variante", "neutro"), "resultados": [], "parciales": [],
+        "variante": body.get("variante", "neutro"),
+        "motor": body.get("motor", "chatterbox"),
+        "resultados": [], "parciales": [],
         "cancelar": False, "error": None, "creado": time.time(),
     }
     COLA.put(jid)
@@ -600,20 +615,32 @@ def generar(body: dict) -> dict:
         raise HTTPException(400, "el guion está vacío")
     if sum(len(i["texto"]) for i in limpio) > MAX_CHARS:
         raise HTTPException(400, f"el guion supera {MAX_CHARS} caracteres")
+    # Este estudio clona una voz, no inventa hablantes: sin referencia no se genera.
+    if not body.get("ref"):
+        raise HTTPException(400, "elegí una referencia de voz: el motor clona tu voz, no genera voces nuevas")
 
     jid = uuid.uuid4().hex[:12]
+    motor_nombre = str(body.get("motor") or "chatterbox")
+    if motor_nombre not in MOTORES_DISPONIBLES:
+        raise HTTPException(400, f"motor desconocido: {motor_nombre}")
+    if not MOTORES_DISPONIBLES[motor_nombre]():
+        raise HTTPException(400, f"el motor {motor_nombre} no está instalado")
+    # Lo calibrado en la toma manda: la UI ya no expone estos ajustes.
+    calibrada = meta_ref(REFS / str(body.get("ref"))) if body.get("ref") else {}
     TRABAJOS[jid] = {
         "id": jid,
         "estado": "en_cola",
         "progreso": 0.0,
         "detalle": "en cola",
         "items": limpio,
+        "motor": motor_nombre,
         "ref": body.get("ref"),
         "lang": body.get("lang", "es"),
         "variante": body.get("variante", "neutro"),
-        "exag": float(body.get("exag", 0.4)),
+        "exag": float(body.get("exag", calibrada.get("exag") or 0.4)),
         "cfg": float(body.get("cfg", 0.5)),
         "seed": int(body.get("seed", 42)),
+        "tau": float(body.get("tau", calibrada.get("tau") or 0.10)),
         "lufs": float(body.get("lufs", -14)),
         "pausas": voz.normalizar_pausas(body.get("pausas")),
         "cortar_comas": bool(body.get("cortar_comas", False)),

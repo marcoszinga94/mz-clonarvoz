@@ -294,6 +294,29 @@ def evaluar_toma(motor: Motor, ref: Path, lang: str = "es", exag: float = 0.4,
     }
 
 
+def calibrar_openvoice(motor, ref: Path, lang: str = "es",
+                       taus=(0.05, 0.10, 0.20, 0.35), seed: int = 7,
+                       progreso=None) -> dict:
+    """Elige el `tau` que deja la toma más parecida a la referencia.
+
+    En OpenVoice `tau` es la temperatura del encoder posterior: más bajo deja
+    una toma más estable y más apegada al timbre objetivo. Se mide igual que en
+    Chatterbox (similitud del hablante + distancia de tono).
+    """
+    ref = Path(ref)
+    texto = ("Mira, esto es una prueba de mi propia voz para calibrar el clon. "
+             "No hace falta tener un estudio para sonar bien.")
+    pruebas = []
+    for i, tau in enumerate(taus):
+        if progreso:
+            progreso(i, len(taus), f"tau {tau:.2f}")
+        wav = motor.frase(texto, ref, lang, 0.0, 0.0, seed + i, tau=tau)
+        score, sim, f0 = motor.puntuar(wav, ref)
+        pruebas.append({"tau": tau, "score": score, "sim": sim, "f0": f0})
+    mejor = max(pruebas, key=lambda p: p["score"])
+    return {"ref": ref.name, "motor": "openvoice", "mejor": mejor, "pruebas": pruebas}
+
+
 # --------------------------------------------------------------------------- #
 # Video 9:16 con subtítulos quemados
 # --------------------------------------------------------------------------- #
@@ -701,11 +724,6 @@ def partir_trozos(texto: str, max_chars: int = 180,
     return [(t, n) for t, n in trozos if t]
 
 
-def partir_frases(texto: str, max_chars: int = 180) -> list[str]:
-    """Solo los textos de `partir_trozos` (compatibilidad)."""
-    return [t for t, _ in partir_trozos(texto, max_chars)]
-
-
 class Cancelado(Exception):
     """Se lanza cuando el usuario cancela una generación en curso."""
 
@@ -717,7 +735,8 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                recortar: bool = True,
                silencio_max_ms: int = 350,
                al_trozo=None, cancelado=None,
-               ajustar: bool = True) -> tuple["object", list[str], list[float]]:
+               ajustar: bool = True,
+               extra: dict | None = None) -> tuple["object", list[str], list[float]]:
     """Genera por trozos y concatena. Devuelve (wav, frases, duraciones)."""
     torch = motor.torch
     ajustes = normalizar_pausas(pausas)
@@ -731,7 +750,8 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
             progreso(i, len(trozos), trozo)
         esperado = len(trozo) / 15.0  # ~15 car/s de habla
         for intento in range(3):
-            wav = motor.frase(trozo, ref, lang, exag, cfg, seed + i * 17 + intento)
+            wav = motor.frase(trozo, ref, lang, exag, cfg,
+                              seed + i * 17 + intento, **(extra or {}))
             if recortar:
                 wav = recortar_silencio(wav, motor.sr)
             if silencio_max_ms:
@@ -748,13 +768,14 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
         # Si el trozo se alejó de la voz de la referencia, se prueba otra toma
         # y se queda la más parecida. Evita que cada frase suene a otra persona.
         if ref and ajustar:
+            umbral = getattr(motor, "umbral_voz", 0.87)
             score, sim, f0 = motor.puntuar(wav, ref)
-            if score < 0.87:
-                for extra in (1, 2):
+            if score < umbral:
+                for intento_extra in (1, 2):
                     if cancelado and cancelado():
                         raise Cancelado()
                     alt = motor.frase(trozo, ref, lang, exag, cfg,
-                                      seed + i * 17 + 101 * extra)
+                                      seed + i * 17 + 101 * intento_extra, **(extra or {}))
                     if recortar:
                         alt = recortar_silencio(alt, motor.sr)
                     if silencio_max_ms:
@@ -762,7 +783,7 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                     s_alt, sim_alt, f0_alt = motor.puntuar(alt, ref)
                     if s_alt > score:
                         wav, score, sim, f0 = alt, s_alt, sim_alt, f0_alt
-                    if score >= 0.87:
+                    if score >= umbral:
                         break
                 print(f"  ⟳ ajuste de voz: {sim:.3f} / {f0:.1f} Hz → {score:.3f}",
                       file=sys.stderr)

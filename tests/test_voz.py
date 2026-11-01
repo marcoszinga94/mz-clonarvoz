@@ -14,8 +14,10 @@ import voz  # noqa: E402
 
 # ------------------------------------------------------------------ troceado
 
-def test_partir_frases_respeta_puntuacion():
-    assert voz.partir_frases("Uno. Dos, tres; cuatro!") == ["Uno.", "Dos, tres; cuatro!"]
+def test_partir_trozos_respeta_puntuacion():
+    assert [t for t, _ in voz.partir_trozos("Uno. Dos, tres; cuatro!")] == [
+        "Uno.", "Dos, tres; cuatro!"
+    ]
 
 
 def test_partir_trozos_marca_el_tipo_de_pausa():

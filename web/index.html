@@ -25,19 +25,21 @@
   </div>
 </header>
 
-<div class="layout">
-  <aside class="col-lateral">
-    <section class="card">
-      <div class="card-h">
-        <h2>Voz</h2>
-        <span class="hint mono" id="ref-dur"></span>
-      </div>
-      <div class="campo">
+<section class="voz-barra" aria-labelledby="voz-t">
+  <div class="card voz-card">
+    <div class="card-h">
+      <h2 id="voz-t">Voz</h2>
+      <span class="hint mono" id="ref-dur"></span>
+    </div>
+
+    <div class="voz-fila">
+      <div class="voz-info">
         <label class="sr" for="select-voz">Clip de referencia</label>
         <select id="select-voz"></select>
+        <audio id="ref-audio" class="player" controls hidden></audio>
       </div>
-      <audio id="ref-audio" class="player" controls hidden></audio>
-      <div class="row">
+
+      <div class="voz-acciones">
         <button class="btn" id="btn-grabar" type="button">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           Grabar
@@ -46,81 +48,37 @@
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4L8 8"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
           Subir
         </button>
+        <button class="btn btn-mini" id="btn-calibrar" type="button" hidden>Calibrar la toma</button>
       </div>
-      <input id="file" type="file" accept="audio/*,.opus,.webm,.m4a" hidden>
-      <button class="btn btn-mini btn-ancho-sm" id="btn-calibrar" type="button" hidden>Calibrar expresividad</button>
+    </div>
+
+    <div class="voz-estado">
       <p class="pista" id="ref-veredicto" hidden></p>
       <button class="link link-accion" id="btn-evaluar" type="button" hidden>Evaluar las tomas guardadas</button>
       <p class="nota">Graba lo que quieras: se usa la toma completa (hasta 60 s). Los primeros 10 s marcan el ritmo; el resto refuerza el timbre. Se guardan las últimas 3 tomas.</p>
-    </section>
+    </div>
 
+    <input id="file" type="file" accept="audio/*,.opus,.webm,.m4a" hidden>
+  </div>
+</section>
+
+<div class="layout">
+  <aside class="col-lateral">
     <section class="card">
       <div class="card-h">
-        <h2>Ajustes</h2>
-        <button class="link" id="btn-reset" type="button">Restablecer</button>
+        <h2>Clon</h2>
       </div>
 
       <div class="campo">
-        <div class="campo-h"><label for="exag">Expresividad</label><span class="mono" id="exag-val">0.40</span></div>
-        <input type="range" id="exag" min="0" max="1" step="0.05" value="0.4">
-        <p class="pista">0.40 voz natural · 0.65 gancho</p>
-      </div>
-
-      <div class="campo">
-        <div class="campo-h"><label for="cfg">Apego al texto</label><span class="mono" id="cfg-val">0.50</span></div>
-        <input type="range" id="cfg" min="0" max="1" step="0.05" value="0.5">
-        <p class="pista">Súbelo si se come palabras.</p>
-      </div>
-
-      <div class="campo-2 campo-idioma">
-        <div class="campo">
-          <label for="lang">Idioma</label>
-          <select id="lang" class="select-sm"></select>
-        </div>
-        <div class="campo">
-          <label for="seed">Semilla</label>
-          <input id="seed" class="input input-sm" type="number" value="42" min="0" step="1">
-        </div>
-      </div>
-
-      <div class="campo-2">
-        <div class="campo">
-          <div class="campo-h"><label for="pausa-frase">Pausa de frase</label><span class="mono">ms</span></div>
-          <input id="pausa-frase" class="input input-sm" type="number" value="180" min="0" max="3000" step="10">
-        </div>
-        <div class="campo">
-          <div class="campo-h"><label for="pausa-coma">Pausa de coma</label><span class="mono">ms</span></div>
-          <input id="pausa-coma" class="input input-sm" type="number" value="90" min="0" max="3000" step="10">
-        </div>
-      </div>
-
-      <div class="campo">
-        <div class="campo-h"><label for="pausa-parrafo">Pausa de párrafo</label><span class="mono">ms</span></div>
-        <input id="pausa-parrafo" class="input input-sm" type="number" value="300" min="0" max="3000" step="10">
-        <p class="pista">Solo aplica si el texto tiene líneas en blanco.</p>
-      </div>
-
-      <div class="campo">
-        <div class="campo-h"><label for="silencio-max">Silencio máximo</label><span class="mono">ms</span></div>
-        <input id="silencio-max" class="input input-sm" type="number" value="350" min="0" max="3000" step="10">
-        <p class="pista">Acorta las pausas que inventa el modelo. 0 = no tocar.</p>
-      </div>
-
-      <label class="check" for="cortar-comas">
-        <input type="checkbox" id="cortar-comas">
-        <span>Cortar en cada coma (controla esa pausa)</span>
-      </label>
-
-      <div class="campo">
-        <label for="recorte">Silencio del modelo</label>
-        <select id="recorte" class="select-sm">
-          <option value="1" selected>Recortar (recomendado)</option>
-          <option value="0">Dejar el que agrega</option>
+        <label for="motor">Motor</label>
+        <select id="motor" class="select-sm">
+          <option value="chatterbox" selected>Chatterbox</option>
+          <option value="openvoice">OpenVoice V2</option>
         </select>
-        <p class="pista">Recortarlo hace que la pausa sea exactamente la de arriba.</p>
+        <p class="pista" id="motor-nota">Chatterbox: clona timbre y ritmo. Más lento, más parecido.</p>
       </div>
 
-      <p class="pista" id="pack-nota" hidden></p>
+      <p class="nota">El resultado usa la voz de la referencia como única fuente. Los ajustes de expresividad, pausas y acento se toman automáticamente del análisis de tu toma.</p>
     </section>
   </aside>
 
@@ -149,25 +107,15 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
           <kbd>Ctrl ↵</kbd>
         </button>
       </div>
+      <p class="pista" id="sin-ref-nota" hidden>Grabá o subí tu voz arriba para poder clonarla.</p>
       <p class="error" id="error-guion" hidden role="alert"></p>
-    </section>
-
-    <section class="card cola-card" id="cola-card" hidden aria-live="polite">
-      <div class="card-h">
-        <h2>Cola de generación</h2>
-        <div class="cola-h-acc">
-          <span class="hint mono" id="cola-resumen"></span>
-          <button class="link" id="btn-limpiar-cola" type="button" hidden>Limpiar</button>
-        </div>
-      </div>
-      <div class="cola" id="cola"></div>
     </section>
 
     <section class="card card-trabajo" id="trabajo" hidden aria-live="polite">
       <div class="trabajo-h">
         <span class="spin" id="spin" aria-hidden="true"></span>
         <div>
-          <h2 id="trabajo-titulo">Generando</h2>
+          <h2 id="trabajo-titulo">Transcribiendo</h2>
           <p class="sub" id="trabajo-detalle">Preparando el modelo</p>
         </div>
         <span class="mono hint" id="trabajo-tiempo">0:00</span>
@@ -175,13 +123,23 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
       </div>
       <div class="barra"><span id="barra-fill"></span></div>
       <audio id="stream-audio" class="player" controls hidden></audio>
-      <div class="parciales" id="parciales" hidden></div>
-      <div class="resultados" id="resultados-parciales"></div>
+    </section>
+
+    <section class="card cola-card" id="cola-card" hidden aria-live="polite">
+      <div class="card-h">
+        <h2>En generación</h2>
+        <span class="hint mono" id="cola-resumen"></span>
+      </div>
+      <div class="cola" id="cola"></div>
+      <div class="preview-gen" id="preview-gen" hidden>
+        <span class="mono hint" id="preview-gen-txt">Escuchá mientras se genera</span>
+        <audio id="stream-audio" class="player" controls hidden></audio>
+      </div>
     </section>
 
     <section class="card">
       <div class="card-h">
-        <h2>Biblioteca</h2>
+        <h2>Ya generados</h2>
         <span class="hint" id="biblio-count"></span>
       </div>
       <div class="lista" id="lista"></div>

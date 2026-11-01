@@ -10,13 +10,6 @@ const fmt = (s) => {
 const bonito = (n) =>
   String(n).replace(/\.[^.]+$/, "").replace(/-\d+$/, "").replace(/[-_]+/g, " ").trim();
 
-const desglosarIdioma = (v) => {
-  if (v === "es-AR") return { lang: "es", variante: "argentina" };
-  if (v === "es-419") return { lang: "es", variante: "latam" };
-  if (v === "es-ES") return { lang: "es", variante: "espana" };
-  return { lang: v, variante: "neutro" };
-};
-
 const hora = (t) => {
   const d = new Date(t * 1000);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -37,8 +30,9 @@ async function api(path, opts) {
 
 const estado = {
   refs: [], motor: "cargando", job: null, timer: null, polling: null, grabando: null,
-  colaDOM: new Map(), colaTimer: null, colaTerminados: 0, colaOcultos: new Set(),
-  jobActual: null, cancelando: new Set(), config: null,
+  colaDOM: new Map(), colaTimer: null, sinRef: false,
+  stream: { cola: [], vistos: 0, job: null, resultados: 0 },
+  jobActual: null, cancelando: new Set(),
 };
 
 function toast(msg, malo = false) {
@@ -64,9 +58,8 @@ async function cargarEstado() {
     estado.motor = e.motor;
     pintarMotor(e);
     pintarRefs(e.refs);
-    estado.packs = e.packs || {};
-    pintarIdiomas(e.idiomas);
-    pintarPack();
+    estado.motores = e.motores || {};
+    pintarMotores();
   } catch (_) {
     pintarMotor({ motor: "error", error: "no responde el servidor" });
   }
@@ -74,15 +67,52 @@ async function cargarEstado() {
   cargarEstado._t = setTimeout(cargarEstado, estado.motor === "listo" ? 15000 : 2000);
 }
 
+const MOTOR_TEXTO = {
+  chatterbox: "Chatterbox: clona timbre y ritmo. Más lento, más parecido.",
+  openvoice: "OpenVoice V2: clona el timbre. Más rápido, solo español.",
+};
+
+function pintarMotores() {
+  const sel = $("#motor");
+  const op = sel.querySelector('option[value="openvoice"]');
+  const listo = Boolean(estado.motores && estado.motores.openvoice);
+  op.disabled = !listo;
+  op.textContent = listo ? "OpenVoice V2 (español)" : "OpenVoice V2 (no instalado)";
+  if (!listo && sel.value === "openvoice") sel.value = "chatterbox";
+  aplicarMotor();
+}
+
+function aplicarMotor() {
+  const ov = $("#motor").value === "openvoice";
+  $("#motor-nota").textContent = MOTOR_TEXTO[ov ? "openvoice" : "chatterbox"];
+}
+
 function pintarMotor(e) {
   const dot = $("#dot");
-  const txt = $("#estado-txt");
-  dot.className = "dot " + (e.motor === "listo" ? "listo" : e.motor === "error" ? "error" : "cargando");
+  const txt = $("#estado-txt");  dot.className = "dot " + (e.motor === "listo" ? "listo" : e.motor === "error" ? "error" : "cargando");
   if (e.motor === "listo") txt.textContent = "Motor listo";
   else if (e.motor === "error") txt.textContent = "Motor con error";
   else txt.textContent = "Cargando modelo";
+  estado.motor = e.motor;
+  aplicarSinRef(Boolean(estado.sinRef));
+  if (estado.sinRef) return;
   $("#btn-generar").disabled = e.motor !== "listo";
   $("#btn-generar").title = e.motor === "listo" ? "" : "El modelo todavía se está cargando";
+}
+
+// Sin referencia no hay clon: el estudio no genera voces nuevas.
+function aplicarSinRef(sin) {
+  estado.sinRef = sin;
+  const btn = $("#btn-generar");
+  const nota = $("#sin-ref-nota");
+  if (nota) nota.hidden = !sin;
+  if (sin) {
+    btn.disabled = true;
+    btn.title = "Grabá o subí tu voz: este estudio clona, no genera voces nuevas";
+  } else if (estado.motor === "listo") {
+    btn.disabled = false;
+    btn.title = "";
+  }
 }
 
 let _refsFirma = "";
@@ -100,8 +130,11 @@ function pintarRefs(refs) {
   const antes = sel.value;
   sel.innerHTML = "";
   if (!refs.length) {
-    sel.append(new Option("Sin referencia (voz por defecto)", ""));
+    // Sin referencia no hay clon: no se ofrece "voz por defecto".
+    sel.append(new Option("Grabá o subí tu voz para empezar", ""));
+    sel.disabled = true;
   } else {
+    sel.disabled = false;
     refs.forEach((r) => {
       const sello = r.mtime ? ` · ${hora(r.mtime)}` : "";
       const nota = r.nota != null ? ` · ${r.nota.toFixed(2)}` : "";
@@ -119,6 +152,7 @@ function pintarRefAudio() {
   const nombre = $("#select-voz").value;
   const ref = estado.refs.find((r) => r.nombre === nombre);
   const audio = $("#ref-audio");
+  aplicarSinRef(!ref);
   if (!ref) {
     audio.hidden = true;
     $("#ref-dur").textContent = "";
@@ -135,7 +169,6 @@ function pintarRefAudio() {
   $("#btn-calibrar").hidden = false;
   $("#btn-evaluar").hidden = estado.refs.length < 2;
   pintarAnalisis(ref.analisis);
-  if (ref.exag != null) aplicarExag(ref.exag, false);
 }
 
 function pintarAnalisis(a) {
@@ -150,30 +183,6 @@ function pintarAnalisis(a) {
     : `Referencia en buen estado · ${partes.join(" · ")}`;
   el.className = `pista ${a.veredicto || "ok"}`;
   el.hidden = false;
-}
-
-function aplicarExag(valor, avisar) {
-  const v = Number(valor);
-  $("#exag").value = v;
-  $("#exag-val").textContent = v.toFixed(2);
-  if (avisar) toast(`Expresividad calibrada: ${v.toFixed(2)}`);
-}
-
-function pintarPack() {
-  const nota = $("#pack-nota");
-  const variante = desglosarIdioma($("#lang").value).variante;
-  if (variante === "neutro") { nota.hidden = true; return; }
-  const clave = variante === "espana" ? "espana" : "latam";
-  if ((estado.packs || {})[clave]) { nota.hidden = true; return; }
-  nota.textContent = `Pack ${clave} sin instalar: se usa el modelo base. Bájalo con ./voz packs ${clave}`;
-  nota.hidden = false;
-}
-
-function pintarIdiomas(idiomas) {
-  const sel = $("#lang");
-  if (sel.options.length) return;
-  Object.entries(idiomas || {}).forEach(([k, v]) => sel.append(new Option(v, k)));
-  sel.value = (estado.packs || {}).latam ? "es-AR" : "es";
 }
 
 // --------------------------------------------------------------- grabar
@@ -280,26 +289,18 @@ async function generar() {
     errorGuion("El modelo todavía se está cargando. Espera al indicador verde.");
     return;
   }
+  if (!$("#select-voz").value) {
+    errorGuion("Grabá o subí tu voz primero: este estudio clona, no genera voces nuevas.");
+    return;
+  }
 
   const items = lineas.map((texto, i) => ({ nombre: tituloDe(texto, i), texto }));
-  const { lang, variante } = desglosarIdioma($("#lang").value);
-  const ms = (sel) => Math.max(0, parseFloat($(sel).value || "0")) / 1000;
+  // Solo se elige motor y referencia: el resto lo resuelve el servidor con los
+  // valores calibrados de la toma.
   const body = {
     items,
-    ref: $("#select-voz").value || null,
-    lang,
-    variante,
-    exag: parseFloat($("#exag").value),
-    cfg: parseFloat($("#cfg").value),
-    seed: parseInt($("#seed").value || "42", 10),
-    pausas: {
-      frase: ms("#pausa-frase"),
-      coma: ms("#pausa-coma"),
-      parrafo: ms("#pausa-parrafo"),
-    },
-    cortar_comas: $("#cortar-comas").checked,
-    recortar_silencio: $("#recorte").value === "1",
-    silencio_max_ms: Math.max(0, parseInt($("#silencio-max").value || "350", 10)),
+    ref: $("#select-voz").value,
+    motor: $("#motor").value,
   };
 
   // No se bloquea el botón: se puede encolar otro guion mientras este se genera.
@@ -321,16 +322,13 @@ function reiniciarStream() {
   a.pause();
   a.removeAttribute("src");
   a.hidden = true;
-  stream.cola = [];
-  stream.vistos = 0;
-  $("#parciales").innerHTML = "";
-  $("#parciales").hidden = true;
-  $("#btn-cancelar-job").hidden = true;
+  estado.stream = { cola: [], vistos: 0, job: null, resultados: 0 };
+  $("#preview-gen").hidden = true;
 }
 
 function siguienteAudio() {
-  const url = stream.cola.shift();
   const a = $("#stream-audio");
+  const url = estado.stream.cola.shift();
   if (!url) return;
   a.src = url;
   a.hidden = false;
@@ -338,12 +336,12 @@ function siguienteAudio() {
 }
 
 function encolarAudio(url) {
-  stream.cola.push(url);
+  estado.stream.cola.push(url);
   if ($("#stream-audio").paused) siguienteAudio();
 }
 
 $("#stream-audio").addEventListener("ended", () => {
-  if (stream.cola.length) siguienteAudio();
+  if (estado.stream.cola.length) siguienteAudio();
 });
 
 function prepararTrabajo(titulo, detalle) {
@@ -351,7 +349,6 @@ function prepararTrabajo(titulo, detalle) {
   $("#trabajo").hidden = false;
   $("#trabajo-titulo").textContent = titulo;
   $("#trabajo-detalle").textContent = detalle;
-  $("#resultados-parciales").innerHTML = "";
   $("#barra-fill").style.width = "2%";
   $("#spin").hidden = false;
 
@@ -367,16 +364,17 @@ const COLA_ESTADOS = { en_cola: "En cola", generando: "Generando", listo: "Listo
 
 function plantillaCola(j) {
   const titulo = j.n_items === 1 ? "1 clip" : `${j.n_items} clips`;
-  return `<div class="cola-item" data-estado="${j.estado}" data-vistos="0">
+  const motor = j.motor === "openvoice" ? "OpenVoice" : "Chatterbox";
+  return `<div class="cola-item" data-estado="${j.estado}">
     <div class="cola-h">
       <span class="cola-t">${esc(titulo)}</span>
+      <span class="clip-tag" data-motor="${esc(j.motor || "chatterbox")}">${motor}</span>
       <span class="cola-badge">${COLA_ESTADOS[j.estado] || j.estado}</span>
       <span class="mono hint cola-tiempo">0:00</span>
       <button class="btn btn-mini btn-cancelar-cola" data-cancelar="${j.id}" type="button" hidden>Cancelar</button>
     </div>
     <div class="barra"><span></span></div>
     <p class="cola-detalle">En cola</p>
-    <div class="resultados"></div>
   </div>`;
 }
 
@@ -393,33 +391,41 @@ async function refrescarCola() {
   }
 }
 
+const enMarcha = (j) => j.estado === "en_cola" || j.estado === "generando";
+
 function pintarCola(todos) {
-  const lista = todos.filter((j) => !estado.colaOcultos.has(j.id));
+  const activos = todos.filter(enMarcha);
   const cont = $("#cola");
-  $("#cola-card").hidden = lista.length === 0;
-  if (!lista.length) {
+  $("#cola-card").hidden = activos.length === 0;
+
+  if (!activos.length) {
     cont.innerHTML = "";
     estado.colaDOM.clear();
     $("#cola-resumen").textContent = "";
+    if (estado.stream.job) reiniciarStream();
     return;
   }
 
-  const generando = lista.filter((j) => j.estado === "generando").length;
-  const espera = lista.filter((j) => j.estado === "en_cola").length;
-  const listos = lista.filter((j) => j.estado === "listo").length;
-  const errores = lista.filter((j) => j.estado === "error").length;
+  // Los que ya no están activos se sacan de la lista: quedan en "Ya generados".
+  let refrescarLista = false;
+  estado.colaDOM.forEach((nodo, id) => {
+    if (activos.some((j) => j.id === id)) return;
+    const fin = todos.find((j) => j.id === id);
+    if (fin && fin.estado === "error") toast(fin.error || "No se pudo generar", true);
+    if (fin && (fin.estado === "listo" || fin.estado === "cancelado")) refrescarLista = true;
+    nodo.remove();
+    estado.colaDOM.delete(id);
+  });
+
+  const generando = activos.filter((j) => j.estado === "generando").length;
+  const espera = activos.length - generando;
   const partes = [];
   if (generando) partes.push("generando ahora");
   if (espera) partes.push(`${espera} en espera`);
-  if (!generando && !espera) {
-    if (listos) partes.push(`${listos} listo${listos === 1 ? "" : "s"}`);
-    if (errores) partes.push(`${errores} con error`);
-  }
   $("#cola-resumen").textContent = partes.join(" · ");
-  $("#btn-limpiar-cola").hidden = Boolean(generando || espera);
 
   const ahora = Date.now() / 1000;
-  lista.forEach((j) => {
+  activos.forEach((j) => {
     let nodo = estado.colaDOM.get(j.id);
     if (!nodo) {
       cont.insertAdjacentHTML("beforeend", plantillaCola(j));
@@ -429,54 +435,42 @@ function pintarCola(todos) {
     nodo.dataset.estado = j.estado;
     nodo.querySelector(".cola-badge").textContent = COLA_ESTADOS[j.estado] || j.estado;
     nodo.querySelector(".barra span").style.width = `${Math.max(2, Math.round((j.progreso || 0) * 100))}%`;
-    nodo.querySelector(".cola-detalle").textContent =
-      j.estado === "error" ? (j.error || "error desconocido")
-        : j.estado === "listo" ? `Generado en ${fmt(j.segundos || 0)} · −14 LUFS · 48 kHz`
-          : j.detalle || "";
+    nodo.querySelector(".cola-detalle").textContent = j.estado === "error"
+      ? (j.error || "error desconocido") : (j.detalle || "");
     nodo.querySelector(".cola-tiempo").textContent =
-      fmt(j.segundos != null ? j.segundos : ahora - (j.creado || ahora));
+      j.estado === "en_cola" ? "—"
+        : fmt(j.segundos != null ? j.segundos : ahora - (j.inicio || ahora));
 
-    const activo = j.estado === "en_cola" || j.estado === "generando";
     const btnCancelar = nodo.querySelector("[data-cancelar]");
-    btnCancelar.hidden = !activo;
-    if (activo) {
-      const cancelando = estado.cancelando.has(j.id);
-      btnCancelar.disabled = cancelando;
-      btnCancelar.textContent = cancelando ? "Cancelando…" : "Cancelar";
-    } else {
-      estado.cancelando.delete(j.id);
-    }
-
-    // Los resultados se agregan de a uno: no se re-renderiza el audio que ya suena.
-    const caja = nodo.querySelector(".resultados");
-    const vistos = Number(nodo.dataset.vistos || 0);
-    (j.resultados || []).slice(vistos).forEach((r) => {
-      caja.insertAdjacentHTML("beforeend", filaResultado(r));
-    });
-    nodo.dataset.vistos = (j.resultados || []).length;
+    const cancelando = estado.cancelando.has(j.id);
+    btnCancelar.hidden = false;
+    btnCancelar.disabled = cancelando;
+    btnCancelar.textContent = cancelando ? "Cancelando…" : "Cancelar";
   });
 
-  const terminados = lista.filter((j) => j.estado === "listo" || j.estado === "error").length;
-  if (terminados && terminados !== estado.colaTerminados) cargarBiblioteca();
-  estado.colaTerminados = terminados;
-}
+  // Vista previa: suena cada frase a medida que el modelo la termina.
+  const gen = activos.find((j) => j.estado === "generando");
+  if (gen) {
+    if (estado.stream.job !== gen.id) {
+      reiniciarStream();
+      estado.stream.job = gen.id;
+    }
+    (gen.parciales || []).slice(estado.stream.vistos).forEach((p) => encolarAudio(p.url));
+    estado.stream.vistos = (gen.parciales || []).length;
+    $("#preview-gen").hidden = !estado.stream.vistos;
+    $("#preview-gen-txt").textContent = estado.stream.vistos
+      ? `Escuchando mientras se genera · ${estado.stream.vistos} frase${estado.stream.vistos === 1 ? "" : "s"}`
+      : "Escuchando mientras se genera";
 
-function filaResultado(r) {
-  return `<div class="clip">
-    <div>
-      <div class="clip-t">${esc(r.titulo)}</div>
-      <div class="clip-m mono">${fmt(r.dur)}</div>
-    </div>
-    <div class="clip-acc">
-      <a class="icon-btn" href="${r.mp3}" download title="Descargar MP3" aria-label="Descargar MP3">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1"/></svg>
-      </a>
-      ${r.srt ? `<a class="icon-btn" href="${r.srt}" download title="Descargar subtítulos" aria-label="Descargar subtítulos">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4M13 15h4M7 11h2M11 11h6"/></svg>
-      </a>` : ""}
-    </div>
-    <audio controls preload="none" src="${r.mp3}"></audio>
-  </div>`;
+    // Los clips van apareciendo en la biblioteca a medida que se cierran.
+    const hechos = (gen.resultados || []).length;
+    if (hechos !== estado.stream.resultados) {
+      estado.stream.resultados = hechos;
+      if (hechos) refrescarLista = true;
+    }
+  }
+
+  if (refrescarLista) cargarBiblioteca();
 }
 
 // --------------------------------------------------------------- biblioteca
@@ -495,9 +489,14 @@ function filaBiblioteca(c) {
   const fecha = new Date(c.mtime * 1000);
   const cuando = fecha.toLocaleDateString("es", { day: "2-digit", month: "short" }) + " · " +
     fecha.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+  const motor = c.motor === "openvoice" ? "OpenVoice" : "Chatterbox";
+  const variante = { argentina: "argentino", latam: "LatAm", espana: "España" }[c.variante] || "";
   return `<div class="clip">
     <div>
-      <div class="clip-t">${esc(c.titulo || bonito(c.nombre))}</div>
+      <div class="clip-top">
+        <span class="clip-t">${esc(c.titulo || bonito(c.nombre))}</span>
+        <span class="clip-tag" data-motor="${esc(c.motor || "chatterbox")}" title="Motor de clonación">${motor}${variante ? ` · ${variante}` : ""}</span>
+      </div>
       <div class="clip-m mono">${fmt(c.dur)} · ${cuando}</div>
     </div>
     <div class="clip-acc">
@@ -613,14 +612,13 @@ function conectarChips(sel, clave, numerico) {
 async function calibrar() {
   const nombre = $("#select-voz").value;
   if (!nombre) return;
-  const { lang, variante } = desglosarIdioma($("#lang").value);
-  prepararTrabajo("Calibrando la voz", "Probando expresividades");
+  prepararTrabajo("Calibrando la voz", "Probando la toma");
   $("#btn-calibrar").disabled = true;
   try {
     const r = await api("/api/ref/calibrar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombre, lang, variante }),
+      body: JSON.stringify({ nombre, motor: $("#motor").value }),
     });
     seguirCalibracion(r.job);
   } catch (e) {
@@ -651,13 +649,12 @@ function seguirCalibracion(jobId) {
         $("#btn-calibrar").disabled = false;
         estado.jobActual = null;
         const m = j.calibracion.mejor;
-        aplicarExag(m.exag, false);
         $("#trabajo-titulo").textContent = "Voz calibrada";
         $("#trabajo-detalle").textContent =
-          `Expresividad ${m.exag.toFixed(2)} · similitud ${m.sim} · tono ${m.f0} Hz (ref ${j.calibracion.f0_ref})`;
+          `Similitud ${m.sim} · tono ${m.f0} Hz${m.tau != null ? ` · fidelidad ${Number(m.tau).toFixed(2)}` : ""}`;
         $("#barra-fill").style.width = "100%";
         cargarEstado();
-        toast(`Calibrado: expresividad ${m.exag.toFixed(2)}`);
+        toast("Calibración guardada en la referencia");
         return;
       }
       if (j.estado === "cancelado" || j.estado === "error") {
@@ -684,14 +681,13 @@ function seguirCalibracion(jobId) {
 // --------------------------------------------------------------- evaluar tomas
 
 async function evaluarTomas() {
-  const { lang, variante } = desglosarIdioma($("#lang").value);
   prepararTrabajo("Evaluando tomas", "Comparando con tu voz");
   $("#btn-evaluar").disabled = true;
   try {
     const r = await api("/api/ref/evaluar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lang, variante, exag: parseFloat($("#exag").value) }),
+      body: JSON.stringify({ motor: $("#motor").value }),
     });
     seguirEvaluacion(r.job);
   } catch (e) {
@@ -763,7 +759,7 @@ async function transcribirArchivo(file) {
   }
   const datos = new FormData();
   datos.append("archivo", file, file.name);
-  datos.append("lang", desglosarIdioma($("#lang").value).lang);
+  datos.append("lang", "es");
   errorGuion("");
   prepararTrabajo("Transcribiendo", "Subiendo audio");
   try {
@@ -791,9 +787,7 @@ function seguirTranscripcion(jobId) {
         clearTimeout(estado.polling);
         $("#spin").hidden = true;
         $("#btn-cancelar-job").hidden = true;
-        $("#stream-audio").pause();
-        $("#stream-audio").hidden = true;
-        stream.cola = [];
+        reiniciarStream();
         estado.jobActual = null;
         $("#trabajo-titulo").textContent = "Transcripción lista";
         $("#trabajo-detalle").textContent =
@@ -842,9 +836,7 @@ $("#file").addEventListener("change", async (ev) => {
 });
 
 $("#select-voz").addEventListener("change", pintarRefAudio);
-$("#lang").addEventListener("change", pintarPack);
-$("#exag").addEventListener("input", (e) => { $("#exag-val").textContent = (+e.target.value).toFixed(2); });
-$("#cfg").addEventListener("input", (e) => { $("#cfg-val").textContent = (+e.target.value).toFixed(2); });
+$("#motor").addEventListener("change", aplicarMotor);
 $("#guion").addEventListener("input", actualizarContador);
 $("#btn-generar").addEventListener("click", generar);
 $("#cola").addEventListener("click", async (e) => {
@@ -866,14 +858,6 @@ $("#cola").addEventListener("click", async (e) => {
   refrescarCola();
 });
 
-$("#btn-limpiar-cola").addEventListener("click", () => {
-  estado.colaDOM.forEach((_, id) => estado.colaOcultos.add(id));
-  estado.colaDOM.forEach((nodo) => nodo.remove());
-  estado.colaDOM.clear();
-  estado.colaTerminados = 0;
-  $("#cola-card").hidden = true;
-  $("#cola-resumen").textContent = "";
-});
 $("#lista").addEventListener("click", (e) => {
   const b = e.target.closest("[data-borrar]");
   if (b) { borrar(b.dataset.borrar); return; }
@@ -938,21 +922,6 @@ $("#gtema").addEventListener("input", () => { $("#g-error").hidden = true; });
 conectarChips("#gobj", "objetivo", false);
 conectarChips("#gseg", "segundos", true);
 
-$("#btn-reset").addEventListener("click", () => {
-  const c = estado.config || { exag: 0.4, cfg: 0.5, seed: 42 };
-  aplicarExag(c.exag, false);
-  $("#cfg").value = c.cfg; $("#cfg-val").textContent = Number(c.cfg).toFixed(2);
-  $("#seed").value = c.seed; $("#lang").value = "es";
-  if (c.pausas) {
-    ["frase", "coma", "parrafo"].forEach((k) => {
-      const el = document.getElementById(`pausa-${k}`);
-      if (el) el.value = Math.round((c.pausas[k] ?? 0) * 1000);
-    });
-  }
-  $("#silencio-max").value = 350;
-  $("#cortar-comas").checked = false; $("#recorte").value = "1";
-});
-
 $("#btn-ejemplo").addEventListener("click", () => {
   $("#guion").value = [
     "Nadie te dice esto cuando empiezas a publicar. No necesitas más equipo, necesitas publicar más.",
@@ -974,29 +943,14 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// --------------------------------------------------------------- config
-
-async function cargarConfig() {
-  try {
-    const c = await api("/api/config");
-    estado.config = c;
-    aplicarExag(c.exag, false);
-    $("#cfg").value = c.cfg;
-    $("#cfg-val").textContent = Number(c.cfg).toFixed(2);
-    $("#seed").value = c.seed;
-    if (c.pausas) {
-      ["frase", "coma", "parrafo"].forEach((k) => {
-        const el = document.getElementById(`pausa-${k}`);
-        if (el) el.value = Math.round((c.pausas[k] ?? 0) * 1000);
-      });
-    }
-  } catch (_) {}
-}
-
 // --------------------------------------------------------------- inicio
 
-cargarConfig();
 cargarEstado();
 cargarBiblioteca();
 refrescarCola();
 actualizarContador();
+
+// Al volver a la pestaña, recupera trabajos encolados desde otro lado.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refrescarCola();
+});
