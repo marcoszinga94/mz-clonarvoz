@@ -70,13 +70,16 @@ def _escribir_json(ruta: Path, datos) -> None:
 
 def cargar_ajustes() -> dict:
     d = _leer_json(AJUSTES_FILE, {})
-    return {"motor": d.get("motor", "chatterbox"), "ref": d.get("ref")}
+    return {"motor": d.get("motor", "chatterbox"), "ref": d.get("ref"),
+            "fidelidad": int(d.get("fidelidad", 2))}
 
 
 def guardar_ajustes(datos: dict) -> dict:
     actual = cargar_ajustes()
     if datos.get("motor") in ("chatterbox", "openvoice"):
         actual["motor"] = datos["motor"]
+    if datos.get("fidelidad") in (1, 2, 3, 4):
+        actual["fidelidad"] = int(datos["fidelidad"])
     if "ref" in datos:
         nombre = Path(str(datos["ref"] or "")).name
         actual["ref"] = nombre if (REFS / nombre).exists() else None
@@ -331,6 +334,7 @@ def _procesar(job: dict) -> None:
                 recortar=job.get("recortar_silencio", True),
                 silencio_max_ms=job.get("silencio_max_ms", 350),
                 al_trozo=cb_trozo, cancelado=lambda: bool(job.get("cancelar")),
+                fidelidad=max(1, min(int(job.get("fidelidad", 1)), 4)),
                 extra={"tau": float(job.get("tau", 0.15))} if motor_nombre == "openvoice" else None,
             )
         except voz.Cancelado:
@@ -607,6 +611,7 @@ def calibrar_ref(body: dict) -> dict:
         "id": jid, "tipo": "calibracion", "estado": "en_cola", "progreso": 0.0,
         "detalle": "en cola", "ref": ruta.name, "lang": body.get("lang", "es"),
         "variante": body.get("variante", "neutro"),
+        "fidelidad": max(1, min(int(body.get("fidelidad", 1)), 4)),
         "motor": body.get("motor", "chatterbox"),
         "resultados": [], "parciales": [],
         "cancelar": False, "error": None, "creado": time.time(),
@@ -687,6 +692,7 @@ def generar(body: dict) -> dict:
         "ref": body.get("ref"),
         "lang": body.get("lang", "es"),
         "variante": body.get("variante", "neutro"),
+        "fidelidad": max(1, min(int(body.get("fidelidad", 1)), 4)),
         "exag": float(body.get("exag", calibrada.get("exag") or 0.4)),
         "cfg": float(body.get("cfg", 0.5)),
         "seed": int(body.get("seed", 42)),

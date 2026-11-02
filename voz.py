@@ -735,7 +735,7 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
                recortar: bool = True,
                silencio_max_ms: int = 350,
                al_trozo=None, cancelado=None,
-               ajustar: bool = True,
+               ajustar: bool = True, fidelidad: int = 1,
                extra: dict | None = None) -> tuple["object", list[str], list[float]]:
     """Genera por trozos y concatena. Devuelve (wav, frases, duraciones)."""
     torch = motor.torch
@@ -765,9 +765,27 @@ def sintetizar(motor: Motor, texto: str, ref: Path | None, lang: str,
         else:
             print(f"  ⚠ frase problemática, se usa igual: {trozo[:60]!r}", file=sys.stderr)
 
-        # Si el trozo se alejó de la voz de la referencia, se prueba otra toma
-        # y se queda la más parecida. Evita que cada frase suene a otra persona.
-        if ref and ajustar:
+        # Fidelidad alta: N tomas del mismo trozo y se queda la más parecida.
+        if ref and fidelidad > 1:
+            mejor_score, mejor_wav = None, wav
+            for k in range(1, max(1, int(fidelidad))):
+                if cancelado and cancelado():
+                    raise Cancelado()
+                alt = motor.frase(trozo, ref, lang, exag, cfg,
+                                  seed + i * 17 + 37 * k, **(extra or {}))
+                if recortar:
+                    alt = recortar_silencio(alt, motor.sr)
+                if silencio_max_ms:
+                    alt = comprimir_silencios(alt, motor.sr, silencio_max_ms)
+                s_alt, _, _ = motor.puntuar(alt, ref)
+                if mejor_score is None:
+                    mejor_score = motor.puntuar(wav, ref)[0]
+                if s_alt > mejor_score:
+                    mejor_score, mejor_wav = s_alt, alt
+            wav = mejor_wav
+            dur = wav.shape[-1] / motor.sr
+
+        elif ref and ajustar:
             umbral = getattr(motor, "umbral_voz", 0.87)
             score, sim, f0 = motor.puntuar(wav, ref)
             if score < umbral:

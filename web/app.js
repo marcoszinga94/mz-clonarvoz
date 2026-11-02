@@ -138,6 +138,10 @@ function aplicarAjustes() {
     sel.value = m;
     aplicarMotor();
   }
+  const fid = String(estado.ajustes.fidelidad || 1);
+  const selFid = $("#fidelidad");
+  if (selFid && [...selFid.options].some((o) => o.value === fid)) selFid.value = fid;
+
   const guardada = estado.ajustes.ref;
   if (guardada && estado.refs.some((r) => r.nombre === guardada) && $("#select-voz").value !== guardada) {
     _refsFirma = "";          // fuerza el repintado del selector
@@ -150,7 +154,11 @@ async function guardarAjustes() {
     await api("/api/ajustes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ motor: $("#motor").value, ref: $("#select-voz").value || null }),
+      body: JSON.stringify({
+        motor: $("#motor").value,
+        ref: $("#select-voz").value || null,
+        fidelidad: parseInt($("#fidelidad").value || "1", 10),
+      }),
     });
   } catch (_) {}
 }
@@ -180,8 +188,14 @@ function pintarRefs(refs) {
     });
     const conNota = refs.filter((r) => r.nota != null);
     const mejor = conNota.length ? conNota.reduce((a, b) => (b.nota > a.nota ? b : a)) : refs[0];
-    const guardada = ajustesListos && estado.ajustes.ref
+    // La toma guardada manda, salvo que clonе claramente peor que otra:
+    // con fidelidad como prioridad, no tiene sentido arrancar con la peor.
+    let guardada = ajustesListos && estado.ajustes.ref
       ? refs.find((r) => r.nombre === estado.ajustes.ref) : null;
+    if (guardada && mejor.nota != null && guardada.nota != null
+        && guardada.nota < mejor.nota - 0.03) {
+      guardada = null;
+    }
     const elegido = refs.find((r) => r.nombre === antes) || guardada || mejor;
     sel.value = elegido.nombre;
   }
@@ -341,6 +355,7 @@ async function generar() {
     items,
     ref: $("#select-voz").value,
     motor: $("#motor").value,
+    fidelidad: parseInt($("#fidelidad").value || "1", 10),
   };
 
   // No se bloquea el botón: se puede encolar otro guion mientras este se genera.
@@ -877,6 +892,7 @@ $("#file").addEventListener("change", async (ev) => {
 
 $("#select-voz").addEventListener("change", () => { pintarRefAudio(); guardarAjustes(); });
 $("#motor").addEventListener("change", () => { aplicarMotor(); guardarAjustes(); });
+$("#fidelidad").addEventListener("change", guardarAjustes);
 $("#guion").addEventListener("input", actualizarContador);
 $("#btn-generar").addEventListener("click", generar);
 $("#cola").addEventListener("click", async (e) => {
