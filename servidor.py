@@ -448,6 +448,7 @@ def _calibrar(job: dict) -> None:
 
 
 def _evaluar(job: dict) -> None:
+    job["estado"] = "generando"
     motor = obtener_motor(job.get("variante", "neutro"))
     tomas = []
     for i, ruta in enumerate(job["refs"]):
@@ -466,6 +467,48 @@ def _evaluar(job: dict) -> None:
         tomas.append(r)
     tomas.sort(key=lambda t: t["score"], reverse=True)
     job["evaluacion"] = {"tomas": tomas, "mejor": tomas[0]["ref"] if tomas else None}
+    job["progreso"] = 1.0
+
+
+def _comparar(job: dict) -> None:
+    """Genera la misma frase con cada motor y las puntúa con el mismo medidor."""
+    import tempfile
+    import torchaudio as ta
+
+    ref = REFS / job["ref"]
+    if not ref.exists():
+        raise ValueError("la toma ya no existe")
+    frase = job.get("texto") or "Hola, esto es una prueba de mi voz."
+    nombres = job["motores"]
+    job["estado"] = "generando"
+    resultados = []
+
+    for i, nombre in enumerate(nombres):
+        if job.get("cancelar"):
+            raise voz.Cancelado()
+        job["detalle"] = f"probando {nombre} ({i + 1} de {len(nombres)})"
+        try:
+            motor = obtener_motor("neutro", nombre)
+            t0 = time.time()
+            wav, _, _ = voz.sintetizar(motor, frase, ref, "es", 0.4, 0.5, 42,
+                                       ajustar=False)
+            dt = time.time() - t0
+            tmp = Path(tempfile.mkstemp(suffix=".wav", dir="/tmp")[1])
+            ta.save(str(tmp), wav.unsqueeze(0), motor.sr)
+            try:
+                p = voz.puntuar_audio(tmp, ref)
+            finally:
+                tmp.unlink(missing_ok=True)
+            p.update(motor=nombre, segundos=round(dt, 1),
+                     dur=round(wav.shape[-1] / motor.sr, 2))
+        except Exception as e:  # noqa: BLE001
+            p = {"motor": nombre, "error": str(e)}
+        resultados.append(p)
+        job["comparacion"] = sorted(
+            [r for r in resultados if "error" not in r],
+            key=lambda r: r["score"], reverse=True) + [r for r in resultados if "error" in r]
+        job["progreso"] = round((i + 1) / len(nombres), 3)
+
     job["progreso"] = 1.0
 
 
@@ -488,6 +531,8 @@ def _worker() -> None:
                 _calibrar(job)
             elif job.get("tipo") == "evaluacion":
                 _evaluar(job)
+            elif job.get("tipo") == "comparacion":
+                _comparar(job)
             else:
                 _procesar(job)
             # _procesar puede haberlo cancelado: no pisar ese estado.
@@ -676,8 +721,12 @@ def calibrar_ref(body: dict) -> dict:
 
 @app.post("/api/ref/evaluar")
 def evaluar_refs(body: dict) -> dict:
-    refs = sorted(p.name for p in REFS.glob("*.wav")
-                  if not p.name.startswith((".", "_")) and not p.stem.endswith("-completa"))
+    solo = Path(str(body.get("solo") or "")).name
+    if solo:
+        refs = [solo] if (REFS / solo).exists() else []
+    else:
+        refs = sorted(p.name for p in REFS.glob("*.wav")
+                      if not p.name.startswith((".", "_")) and not p.stem.endswith("-completa"))
     if not refs:
         raise HTTPException(400, "no hay tomas guardadas")
     jid = uuid.uuid4().hex[:12]
@@ -851,6 +900,29 @@ def descargar_modelo(modelo_id: str) -> dict:
     return {"job": jid}
 
 
+@app.post("/api/comparar")
+def comparar(body: dict) -> dict:
+    ref = Path(str(body.get("ref") or "")).name
+    if not (REFS / ref).exists():
+        raise HTTPException(400, "elegí una toma primero")
+    motores = [n for n, listo in MOTORES_DISPONIBLES.items() if listo()]
+    if body.get("motores"):
+        motores = [m for m in body["motores"] if m in motores]
+    if not motores:
+        raise HTTPException(400, "no hay motores instalados")
+
+    jid = uuid.uuid4().hex[:12]
+    TRABAJOS[jid] = {
+        "id": jid, "tipo": "comparacion", "estado": "en_cola", "progreso": 0.0,
+        "detalle": "en cola", "ref": ref, "motores": motores,
+        "texto": body.get("texto"), "comparacion": [], "cancelar": False,
+        "creado": time.time(),
+    }
+    COLA.put(jid)
+    guardar_cola()
+    return {"job": jid, "motores": motores}
+
+
 @app.get("/api/ajustes")
 def api_ajustes() -> dict:
     return cargar_ajustes()
@@ -871,7 +943,8 @@ def api_trabajos() -> dict:
     ahora = time.time()
     salida = []
     for j in TRABAJOS.values():
-        if j.get("tipo") in ("transcripcion", "calibracion", "evaluacion", "descarga"):
+        if j.get("tipo") in ("transcripcion", "calibracion", "evaluacion",
+                             "descarga", "comparacion"):
             continue
         fin = j.get("fin") or j.get("creado", 0)
         activo = j.get("estado") in ("en_cola", "generando")

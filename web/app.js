@@ -270,7 +270,16 @@ async function empezarGrabacion() {
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus" : "";
     const media = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : undefined);
-    const g = { stream, media, chunks: [], t0: performance.now(), iv: null, tope: null };
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const fuente = audioCtx.createMediaStreamSource(stream);
+    const analizador = audioCtx.createAnalyser();
+    analizador.fftSize = 2048;
+    fuente.connect(analizador);
+    const g = {
+      stream, media, chunks: [], t0: performance.now(), iv: null,
+      audioCtx, analizador, buffer: new Float32Array(analizador.fftSize),
+      ruido: null, pico: -99,
+    };
     estado.grabando = g;
 
     media.ondataavailable = (ev) => { if (ev.data.size) g.chunks.push(ev.data); };
@@ -282,9 +291,44 @@ async function empezarGrabacion() {
     g.iv = setInterval(() => {
       const s = (performance.now() - g.t0) / 1000;
       $("#modal-tiempo").textContent = fmt(s);
+      leerNivel(g);
+      if (s > 60) $("#modal-tiempo").textContent = `${fmt(s)} · ya alcanza`;
     }, 100);
   } catch (err) {
     toast("No pude abrir el micrófono: " + err.message, true);
+  }
+}
+
+function leerNivel(g) {
+  g.analizador.getFloatTimeDomainData(g.buffer);
+  let suma = 0, pico = 0;
+  for (const v of g.buffer) {
+    suma += v * v;
+    const a = Math.abs(v);
+    if (a > pico) pico = a;
+  }
+  const rms = Math.sqrt(suma / g.buffer.length);
+  const db = 20 * Math.log10(rms + 1e-9);
+  g.pico = Math.max(g.pico, db);
+  if (db > -70 && (g.ruido === null || db < g.ruido)) g.ruido = db;
+
+  const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+  const barra = $("#nivel-fill");
+  barra.style.width = `${pct}%`;
+  barra.classList.toggle("alto", db > -6);
+  barra.classList.toggle("bajo", db < -45 && db > -70);
+
+  $("#nivel-db").textContent = db <= -70 ? "silencio" : `${db.toFixed(0)} dB`;
+
+  const est = $("#nivel-estado");
+  let clase = "bien", texto = "Bien";
+  if (db > -6) { clase = "alto"; texto = "Saturando"; }
+  else if (db < -45) { clase = "bajo"; texto = "Muy bajo"; }
+  est.className = `nivel-estado ${clase}`;
+  est.textContent = texto;
+
+  if (g.ruido !== null && g.pico > g.ruido + 4) {
+    $("#nivel-snr").textContent = `SNR ~${Math.round(g.pico - g.ruido)} dB`;
   }
 }
 
@@ -301,6 +345,7 @@ function cancelarGrabacion() {
   clearInterval(g.iv);
   g.media.onstop = null;
   if (g.media.state !== "inactive") g.media.stop();
+  if (g.audioCtx) g.audioCtx.close().catch(() => {});
   g.stream.getTracks().forEach((t) => t.stop());
   estado.grabando = null;
   $("#modal").hidden = true;
@@ -308,16 +353,17 @@ function cancelarGrabacion() {
 
 async function finalizarGrabacion(g) {
   clearInterval(g.iv);
+  if (g.audioCtx) g.audioCtx.close().catch(() => {});
   g.stream.getTracks().forEach((t) => t.stop());
   estado.grabando = null;
   $("#modal").hidden = true;
 
   const blob = new Blob(g.chunks, { type: g.media.mimeType || "audio/webm" });
   if (blob.size < 3000) { toast("La grabación quedó vacía. Prueba otra vez.", true); return; }
-  await subirReferencia(blob, "toma.webm", "mi-voz");
+  await subirReferencia(blob, "toma.webm", "mi-voz", true);
 }
 
-async function subirReferencia(blob, nombre, etiqueta) {
+async function subirReferencia(blob, nombre, etiqueta, evaluarDespues = false) {
   const datos = new FormData();
   datos.append("archivo", blob, nombre);
   datos.append("nombre", etiqueta);
@@ -330,6 +376,7 @@ async function subirReferencia(blob, nombre, etiqueta) {
     $("#select-voz").value = r.nombre;
     pintarRefAudio();
     $("#ref-audio").play().catch(() => {});
+    if (evaluarDespues) evaluarTomaNueva(r.nombre);
   } catch (e) {
     toast(String(e.message), true);
   }
@@ -752,6 +799,55 @@ function seguirCalibracion(jobId) {
   estado.polling = setTimeout(tick, 600);
 }
 
+// --------------------------------------------------------------- comparar
+
+async function compararMotores() {
+  const ref = $("#select-voz").value;
+  if (!ref) { toast("Elegí una toma primero", true); return; }
+  $("#modal-comparar").hidden = false;
+  $("#mc-detalle").textContent = "Preparando la comparación…";
+  $("#tabla-comparar").innerHTML = '<p class="pista">Cargando motores…</p>';
+  try {
+    const r = await api("/api/comparar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ref }),
+    });
+    const seguir = async () => {
+      const j = await api(`/api/job/${r.job}`);
+      $("#mc-detalle").textContent = j.estado === "listo"
+        ? "Resultado, mejor primero. Misma frase y misma toma en todos."
+        : (j.detalle || "Generando…");
+      pintarComparacion(j.comparacion || []);
+      if (["listo", "error", "cancelado"].includes(j.estado)) return;
+      setTimeout(seguir, 2000);
+    };
+    setTimeout(seguir, 1500);
+  } catch (e) {
+    $("#tabla-comparar").innerHTML = `<p class="error">${esc(String(e.message))}</p>`;
+  }
+}
+
+function pintarComparacion(filas) {
+  if (!filas.length) return;
+  const cabecera = `<div class="fila-comp">
+    <span class="cabecera">Motor</span><span class="cabecera">Similitud</span>
+    <span class="cabecera">Tono</span><span class="cabecera">Tiempo</span>
+  </div>`;
+  $("#tabla-comparar").innerHTML = cabecera + filas.map((f, i) => {
+    if (f.error) {
+      return `<div class="fila-comp"><span>${etiquetaMotor(f.motor)}</span>
+        <span class="mono" style="grid-column: span 3">${esc(f.error.slice(0, 80))}</span></div>`;
+    }
+    return `<div class="fila-comp ${i === 0 ? "mejor" : ""}">
+      <span>${etiquetaMotor(f.motor)}${i === 0 ? " · mejor" : ""}</span>
+      <span class="mono">${f.sim.toFixed(3)}</span>
+      <span class="mono">${f.f0} Hz</span>
+      <span class="mono">${f.segundos}s</span>
+    </div>`;
+  }).join("");
+}
+
 // --------------------------------------------------------------- modelos
 
 async function abrirModelos() {
@@ -819,6 +915,28 @@ async function descargarModelo(id, boton) {
     boton.disabled = false;
     boton.textContent = "Descargar";
   }
+}
+
+async function evaluarTomaNueva(nombre) {
+  try {
+    const r = await api("/api/ref/evaluar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ solo: nombre, lang: "es" }),
+    });
+    const seguir = async () => {
+      const j = await api(`/api/job/${r.job}`);
+      if (j.estado === "listo") {
+        const t = (j.evaluacion && j.evaluacion.tomas || [])[0];
+        if (t) toast(`Toma nueva: ${t.score.toFixed(2)} de similitud`);
+        cargarEstado();
+        return;
+      }
+      if (j.estado === "error") { toast(j.error || "no se pudo evaluar", true); return; }
+      setTimeout(seguir, 1500);
+    };
+    setTimeout(seguir, 1200);
+  } catch (_) { /* la evaluación es opcional */ }
 }
 
 // --------------------------------------------------------------- borrar toma
@@ -1042,6 +1160,11 @@ $("#btn-cancelar-job").addEventListener("click", async () => {
 });
 
 $("#btn-modelos").addEventListener("click", abrirModelos);
+$("#btn-comparar").addEventListener("click", compararMotores);
+$("#mc-cerrar").addEventListener("click", () => { $("#modal-comparar").hidden = true; $("#btn-comparar").focus(); });
+$("#modal-comparar").addEventListener("click", (e) => {
+  if (e.target.id === "modal-comparar") $("#modal-comparar").hidden = true;
+});
 $("#mm-cerrar").addEventListener("click", () => { $("#modal-modelos").hidden = true; $("#btn-modelos").focus(); });
 $("#modal-modelos").addEventListener("click", (e) => {
   if (e.target.id === "modal-modelos") $("#modal-modelos").hidden = true;

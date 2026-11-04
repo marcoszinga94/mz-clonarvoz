@@ -93,6 +93,7 @@
         <p class="pista" id="fidelidad-nota">Genera varias tomas de cada frase y se queda la más parecida a tu voz.</p>
       </div>
 
+      <button class="link link-accion" id="btn-comparar" type="button">Comparar motores con mi voz</button>
       <button class="link link-accion" id="btn-modelos" type="button">Ver todos los modelos</button>
 
       <p class="nota">El resultado usa la voz de la referencia como única fuente. Los ajustes de expresividad, pausas y acento se toman automáticamente del análisis de tu toma.</p>
@@ -212,6 +213,15 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
   </div>
 </div>
 
+<div class="modal" id="modal-comparar" hidden role="dialog" aria-modal="true" aria-labelledby="mc-t">
+  <div class="modal-caja modal-ancho">
+    <h2 id="mc-t">Comparar motores</h2>
+    <p class="sub" id="mc-detalle">Generando la misma frase con cada motor instalado.</p>
+    <div class="comparar" id="tabla-comparar"></div>
+    <button class="link" id="mc-cerrar" type="button">Cerrar</button>
+  </div>
+</div>
+
 <div class="modal" id="modal-modelos" hidden role="dialog" aria-modal="true" aria-labelledby="mm-t">
   <div class="modal-caja modal-ancho">
     <h2 id="mm-t">Modelos de voz</h2>
@@ -227,7 +237,14 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
     <h2 id="modal-t">Grabando</h2>
     <p class="modal-frase">Mira, esto es algo que aprendí después de mucho prueba y error. No hace falta tener un estudio para sonar bien. Sigue hablando hasta que te sientas cómodo.</p>
     <p class="pista">Sin límite de tiempo. Cuanto más hables, más estable sale el timbre.</p>
-    <div class="ondas" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="nivel">
+      <div class="nivel-barra"><span id="nivel-fill"></span></div>
+      <div class="nivel-info">
+        <span class="mono" id="nivel-db">— dB</span>
+        <span class="nivel-estado" id="nivel-estado">Esperando…</span>
+        <span class="mono" id="nivel-snr"></span>
+      </div>
+    </div>
     <p class="mono modal-tiempo" id="modal-tiempo">0:00</p>
     <button class="btn btn-primary btn-ancho" id="btn-detener" type="button">Detener y guardar</button>
     <button class="link" id="btn-cancelar" type="button">Cancelar</button>

@@ -50,6 +50,10 @@ un lote de 10 posts se hace en ~50 min (déjalo corriendo de noche).
 `./app` levanta un servidor en `127.0.0.1:8000` y abre el navegador. Nada sale de
 tu equipo: ni el audio, ni el texto, ni las peticiones.
 
+- **Grabación guiada**: vúmetro en vivo, nivel en dB, aviso de "muy bajo" o
+  "saturando", SNR estimada y evaluación automática al terminar.
+- **Comparar motores**: genera la misma frase con cada motor instalado y mide
+  similitud, tono y tiempo con el mismo medidor.
 - **Voz**: graba sin límite desde el navegador (MediaRecorder), sube un archivo o
   elige una referencia ya limpia. Se usa la toma completa (hasta 60 s): Chatterbox
   toma los primeros 10 s para el ritmo y promedia todo el audio para el timbre.

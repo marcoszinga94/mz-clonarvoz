@@ -527,3 +527,37 @@ textarea:hover { border-color: #3d3d3d; }
 .modelo[data-semaforo="rojo"] .semaforo { background: var(--danger); }
 
 .modelo-acc { margin-top: 4px; }
+
+/* ---------------------------------------------------------------- vúmetro */
+
+.nivel { margin-top: 24px; display: flex; flex-direction: column; gap: 8px; }
+.nivel-barra {
+  height: 8px; border-radius: 999px; background: var(--surface-3);
+  overflow: hidden;
+}
+.nivel-barra span {
+  display: block; height: 100%; width: 0%; border-radius: 999px;
+  background: #7ed957;
+  transition: width 80ms linear, background 200ms linear;
+}
+.nivel-barra span.bajo { background: #f0c15c; }
+.nivel-barra span.alto { background: var(--danger); }
+.nivel-info {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12px; line-height: 16px; color: var(--muted);
+}
+.nivel-estado { font-weight: 600; }
+.nivel-estado.bien { color: #7ed957; }
+.nivel-estado.bajo { color: #f0c15c; }
+.nivel-estado.alto { color: var(--danger); }
+
+.comparar { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 8px; text-align: left; }
+.fila-comp {
+  display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 8px;
+  padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface-2); font-size: 14px; line-height: 20px;
+  align-items: center;
+}
+.fila-comp.mejor { border-color: var(--accent); }
+.fila-comp .mono { font-size: 12px; color: var(--muted); }
+.fila-comp .cabecera { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }

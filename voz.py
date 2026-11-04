@@ -692,6 +692,44 @@ def partir_trozos(texto: str, max_chars: int = 180,
     return [(t, n) for t, n in trozos if t]
 
 
+_VE = None
+
+
+def puntuar_audio(ruta: Path, ref: Path) -> dict:
+    """Similitud y tono de un audio contra la referencia, con el mismo medidor.
+
+    Se usa para comparar motores entre sí: cada motor puntúa distinto con su
+    propio encoder, así que acá todos pasan por el VoiceEncoder de Chatterbox.
+    """
+    import librosa
+    import numpy as np
+    import torch
+
+    global _VE
+    if _VE is None or _VE[0] != (str(ref), ref.stat().st_mtime):
+        from chatterbox.models.voice_encoder.voice_encoder import VoiceEncoder
+        ve = VoiceEncoder()
+        ve.load_state_dict(torch.load(ROOT / "models" / "cb-latam" / "ve.pt",
+                                      map_location="cpu", weights_only=True))
+        ve.eval()
+        w, _ = librosa.load(str(ref), sr=16000, mono=True)
+        e = ve.embeds_from_wavs([w], sample_rate=16000).mean(axis=0)
+        f0r, _, _ = librosa.pyin(w[:16000 * 10], fmin=60, fmax=400, sr=16000,
+                                 frame_length=1024)
+        f0r = f0r[np.isfinite(f0r)]
+        _VE = ((str(ref), ref.stat().st_mtime), ve, e, float(np.median(f0r)) if len(f0r) else 0.0)
+
+    _, ve, e_ref, f_ref = _VE
+    w, _ = librosa.load(str(ruta), sr=16000, mono=True)
+    e = ve.embeds_from_wavs([w], sample_rate=16000).mean(axis=0)
+    sim = float(np.dot(e_ref, e) / (np.linalg.norm(e_ref) * np.linalg.norm(e)))
+    f0, _, _ = librosa.pyin(w[:16000 * 10], fmin=60, fmax=400, sr=16000, frame_length=1024)
+    f0 = f0[np.isfinite(f0)]
+    f0 = float(np.median(f0)) if len(f0) else 0.0
+    return {"sim": round(sim, 3), "f0": round(f0, 1),
+            "score": round(sim - 0.002 * abs(f0 - f_ref), 3)}
+
+
 class Cancelado(Exception):
     """Se lanza cuando el usuario cancela una generación en curso."""
 
