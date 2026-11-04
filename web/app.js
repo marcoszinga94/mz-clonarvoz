@@ -74,8 +74,15 @@ const MOTOR_TEXTO = {
   chatterbox: "Chatterbox: clona timbre y ritmo. Más lento, más parecido.",
   openvoice: "OpenVoice V2: clona el timbre. Más rápido, solo español.",
   qwen: "Qwen3-TTS: la mejor similitud medida. El más lento (≈15× tiempo real).",
+  qwen17: "Qwen3-TTS 1.7B: más calidad, ~3× más lento que el 0.6B.",
+  voxcpm2: "VoxCPM2: 30 idiomas y 48 kHz. Calidad alta, ~7 min por clip.",
 };
-const OPCIONALES = { openvoice: "OpenVoice V2 · MeloTTS", qwen: "Qwen3-TTS · 0.6B" };
+const OPCIONALES = {
+  openvoice: "OpenVoice V2 · MeloTTS",
+  qwen: "Qwen3-TTS · 0.6B",
+  qwen17: "Qwen3-TTS · 1.7B",
+  voxcpm2: "VoxCPM2 · 0.5B",
+};
 
 function pintarMotores() {
   const sel = $("#motor");
@@ -754,7 +761,15 @@ async function abrirModelos() {
     const r = await api("/api/modelos");
     $("#lista-modelos").innerHTML = r.modelos.map((m) => {
       const estado = m.instalado ? "Instalado" : (m.gated ? "Requiere HF" : "Descargable");
-      return `<div class="modelo" data-semaforo="${m.semaforo}">
+      const accion = m.instalado ? ""
+        : m.semaforo === "rojo"
+          ? `<span class="pista">No recomendado para este equipo</span>`
+        : m.instalable === "auto"
+          ? `<button class="btn btn-mini" data-descargar="${m.id}">Descargar</button>`
+          : m.instalable === "hf"
+            ? `<span class="pista">Requiere cuenta de Hugging Face</span>`
+            : `<span class="pista">Instalación manual</span>`;
+      return `<div class="modelo" data-semaforo="${m.semaforo}" data-modelo="${m.id}">
         <div class="modelo-h">
           <span class="semaforo" aria-hidden="true"></span>
           <span class="modelo-n">${esc(m.nombre)} <span class="modelo-v">${esc(m.version)}</span></span>
@@ -762,10 +777,47 @@ async function abrirModelos() {
         </div>
         <div class="modelo-meta">${esc(m.params)} · ${String(m.gb).replace(".", ",")} GB · ${esc(m.licencia)} · ${esc(m.idiomas)} idiomas</div>
         <div class="modelo-meta">${esc(m.motivo)}${m.medido ? " · medido" : " · estimado"}</div>
+        ${accion ? `<div class="modelo-acc">${accion}</div>` : ""}
       </div>`;
     }).join("");
   } catch (e) {
     $("#lista-modelos").innerHTML = `<p class="error">${esc(String(e.message))}</p>`;
+  }
+}
+
+$("#lista-modelos").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-descargar]");
+  if (b) descargarModelo(b.dataset.descargar, b);
+});
+
+async function descargarModelo(id, boton) {
+  boton.disabled = true;
+  boton.textContent = "Descargando…";
+  try {
+    const r = await api(`/api/modelos/${id}/descargar`, { method: "POST" });
+    if (r.instalado) { toast("Ya estaba instalado"); await abrirModelos(); return; }
+    const seguir = async () => {
+      const j = await api(`/api/job/${r.job}`);
+      if (j.estado === "listo") {
+        toast(`${id} instalado`);
+        await abrirModelos();
+        await cargarEstado();
+        return;
+      }
+      if (j.estado === "error") {
+        toast(j.error || "falló la descarga", true);
+        boton.disabled = false;
+        boton.textContent = "Descargar";
+        return;
+      }
+      boton.textContent = `${Math.round((j.progreso || 0) * 100)}%`;
+      setTimeout(seguir, 1500);
+    };
+    setTimeout(seguir, 1200);
+  } catch (e) {
+    toast(String(e.message), true);
+    boton.disabled = false;
+    boton.textContent = "Descargar";
   }
 }
 

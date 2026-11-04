@@ -525,3 +525,5 @@ textarea:hover { border-color: #3d3d3d; }
 .modelo[data-semaforo="verde"] .semaforo { background: #7ed957; }
 .modelo[data-semaforo="amarillo"] .semaforo { background: #f0c15c; }
 .modelo[data-semaforo="rojo"] .semaforo { background: var(--danger); }
+
+.modelo-acc { margin-top: 4px; }

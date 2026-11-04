@@ -28,11 +28,24 @@ def disponible() -> bool:
     return PYTHON.exists() and WORKER.exists()
 
 
+def instalado(repo: str) -> bool:
+    """True si el modelo ya está en la caché de Hugging Face."""
+    if not disponible():
+        return False
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo, local_files_only=True)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class MotorQwen:
     nombre = "qwen"
     umbral_voz = 0.87
 
-    def __init__(self, threads: int | None = None, variante: str = "neutro"):
+    def __init__(self, threads: int | None = None, variante: str = "neutro",
+                 repo: str = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"):
         self.torch = torch
         self.sr = 24000
         self._n = 0
@@ -40,7 +53,7 @@ class MotorQwen:
         self._perfil = None
         self._textos: dict[tuple[str, float], str] = {}
         self.proc = subprocess.Popen(
-            [str(PYTHON), str(WORKER)],
+            [str(PYTHON), str(WORKER), "--model", repo],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
         )
         self._esperar_listo()

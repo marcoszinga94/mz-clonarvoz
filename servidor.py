@@ -29,6 +29,8 @@ import guiones
 import motor_openvoice
 import motor_qwen
 import modelos
+import instalador
+import motor_vox
 import voz
 
 ROOT = Path(__file__).resolve().parent
@@ -102,6 +104,7 @@ def registrar_historial(job: dict) -> None:
     historial = sorted(historial, key=lambda h: h.get("fin") or h.get("creado") or 0)[-HISTORIAL_MAX:]
     _escribir_json(HISTORIAL_FILE, historial)
 COLA_TX: queue.Queue[str] = queue.Queue()
+COLA_DESC: queue.Queue[str] = queue.Queue()
 _DUR_CACHE: dict[str, tuple[float, float]] = {}
 
 
@@ -212,6 +215,8 @@ MOTORES_DISPONIBLES = {
     "chatterbox": lambda: True,
     "openvoice": lambda: motor_openvoice.disponible(),
     "qwen": lambda: motor_qwen.disponible(),
+    "qwen17": lambda: motor_qwen.instalado("Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
+    "voxcpm2": lambda: motor_vox.disponible(),
 }
 
 
@@ -228,12 +233,20 @@ def obtener_motor(variante: str, nombre: str = "chatterbox"):
     if nombre not in MOTORES_DISPONIBLES:
         raise ValueError(f"motor desconocido: {nombre}")
 
-    if nombre == "qwen":
-        clave = "qwen:es"
+    if nombre in ("qwen", "qwen17"):
+        clave = f"{nombre}:es"
         if clave in MOTORES:
             MOTORES.move_to_end(clave)
             return MOTORES[clave]
-        motor = motor_qwen.MotorQwen(HILOS)
+        repo = ("Qwen/Qwen3-TTS-12Hz-1.7B-Base" if nombre == "qwen17"
+                else "Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+        motor = motor_qwen.MotorQwen(HILOS, repo=repo)
+    elif nombre == "voxcpm2":
+        clave = "voxcpm2:es"
+        if clave in MOTORES:
+            MOTORES.move_to_end(clave)
+            return MOTORES[clave]
+        motor = motor_vox.MotorVox(HILOS)
     elif nombre == "openvoice":
         clave = "openvoice:es"      # MeloTTS solo tiene español instalado
         if clave in MOTORES:
@@ -312,8 +325,8 @@ def _procesar(job: dict) -> None:
     # Cargar un modelo tarda ~1 min: se informa en vez de dejar el trabajo "en cola".
     if motor_nombre == "openvoice":
         clave = "openvoice:es"
-    elif motor_nombre == "qwen":
-        clave = "qwen:es"
+    elif motor_nombre in ("qwen", "qwen17", "voxcpm2"):
+        clave = f"{motor_nombre}:es"
     else:
         clave = f"chatterbox:{clave_motor(variante)}"
     if clave not in MOTORES:
@@ -519,7 +532,27 @@ def _worker_tx() -> None:
 
 
 cargar_cola()
+def _worker_desc() -> None:
+    while True:
+        jid = COLA_DESC.get()
+        job = TRABAJOS.get(jid)
+        if not job:
+            continue
+        try:
+            job.update(estado="descargando", detalle="iniciando")
+            r = instalador.instalar(
+                job["modelo"],
+                progreso=lambda f, t: job.update(progreso=round(f, 3), detalle=t),
+            )
+            job.update(estado="listo", progreso=1.0, detalle=r.get("detalle", "listo"))
+        except Exception as e:  # noqa: BLE001
+            job.update(estado="error", error=str(e))
+        finally:
+            job["fin"] = time.time()
+
+
 threading.Thread(target=_worker, daemon=True).start()
+threading.Thread(target=_worker_desc, daemon=True).start()
 threading.Thread(target=_worker_tx, daemon=True).start()
 
 
@@ -796,6 +829,28 @@ def api_modelos() -> dict:
     return {"modelos": [modelos.evaluar(m, instalados) for m in modelos.CATALOGO]}
 
 
+@app.post("/api/modelos/{modelo_id}/descargar")
+def descargar_modelo(modelo_id: str) -> dict:
+    m = next((x for x in modelos.CATALOGO if x["id"] == modelo_id), None)
+    if not m:
+        raise HTTPException(404, "modelo desconocido")
+    if m.get("instalable") != "auto":
+        raise HTTPException(400, "este modelo no se instala automáticamente")
+
+    listo = MOTORES_DISPONIBLES.get(modelo_id)
+    if listo and listo():
+        return {"ok": True, "instalado": True}
+
+    jid = uuid.uuid4().hex[:12]
+    TRABAJOS[jid] = {
+        "id": jid, "tipo": "descarga", "modelo": modelo_id,
+        "estado": "en_cola", "progreso": 0.0, "detalle": "en cola",
+        "creado": time.time(),
+    }
+    COLA_DESC.put(jid)
+    return {"job": jid}
+
+
 @app.get("/api/ajustes")
 def api_ajustes() -> dict:
     return cargar_ajustes()
@@ -816,7 +871,7 @@ def api_trabajos() -> dict:
     ahora = time.time()
     salida = []
     for j in TRABAJOS.values():
-        if j.get("tipo") in ("transcripcion", "calibracion", "evaluacion"):
+        if j.get("tipo") in ("transcripcion", "calibracion", "evaluacion", "descarga"):
             continue
         fin = j.get("fin") or j.get("creado", 0)
         activo = j.get("estado") in ("en_cola", "generando")

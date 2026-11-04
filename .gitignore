@@ -16,3 +16,4 @@ refs/*.json
 # estado de la cola
 .estado/
 .venv-qwen/
+.venv-vox/

@@ -30,49 +30,25 @@ CATALOGO = [
         "id": "qwen17", "nombre": "Qwen3-TTS", "version": "1.7B Base",
         "params": "1,7B", "gb": 4.5, "licencia": "Apache-2.0", "comercial": True,
         "idiomas": "10", "clona": True, "rtf": 42, "medido": False,
-        "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "instalable": "auto",
     },
     {
         "id": "voxcpm2", "nombre": "VoxCPM2", "version": "0.5B",
         "params": "0,5B", "gb": 5.0, "licencia": "Apache-2.0", "comercial": True,
         "idiomas": "30", "clona": True, "rtf": 14, "medido": False,
-        "repo": "openbmb/VoxCPM2",
+        "repo": "openbmb/VoxCPM2", "instalable": "auto",
     },
     {
         "id": "cosyvoice3", "nombre": "Fun-CosyVoice 3", "version": "0.5B (2512)",
         "params": "0,5B", "gb": 9.8, "licencia": "Apache-2.0", "comercial": True,
         "idiomas": "9", "clona": True, "rtf": 30, "medido": False,
-        "repo": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+        "repo": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512", "instalable": "manual",
     },
     {
         "id": "pocket", "nombre": "Pocket TTS", "version": "Kyutai",
         "params": "0,1B", "gb": 18.1, "licencia": "CC-BY-4.0", "comercial": True,
         "idiomas": "7", "clona": True, "rtf": 2.5, "medido": False,
-        "repo": "kyutai/pocket-tts", "gated": True,
-    },
-    {
-        "id": "neutts", "nombre": "NeuTTS Nano", "version": "Spanish",
-        "params": "0,23B", "gb": 1.0, "licencia": "NeuTTS Open", "comercial": None,
-        "idiomas": "1 (es)", "clona": True, "rtf": 4, "medido": False,
-        "repo": "neuphonic/neutts-nano-spanish", "gated": True,
-    },
-    {
-        "id": "xtts", "nombre": "XTTS v2", "version": "Coqui",
-        "params": "0,5B", "gb": 2.1, "licencia": "CPML", "comercial": False,
-        "idiomas": "17", "clona": True, "rtf": 8, "medido": False,
-        "repo": "coqui/XTTS-v2",
-    },
-    {
-        "id": "f5", "nombre": "F5-TTS", "version": "Base",
-        "params": "0,34B", "gb": 6.7, "licencia": "CC-BY-NC", "comercial": False,
-        "idiomas": "multi", "clona": True, "rtf": 12, "medido": False,
-        "repo": "SWivid/F5-TTS",
-    },
-    {
-        "id": "kokoro", "nombre": "Kokoro", "version": "82M",
-        "params": "0,08B", "gb": 0.3, "licencia": "Apache-2.0", "comercial": True,
-        "idiomas": "9", "clona": False, "rtf": 0.1, "medido": False,
-        "repo": "hexgrad/Kokoro-82M",
+        "repo": "kyutai/pocket-tts", "gated": True, "instalable": "hf",
     },
 ]
 
