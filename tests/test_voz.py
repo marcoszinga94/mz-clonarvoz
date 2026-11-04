@@ -124,7 +124,7 @@ def test_semaforo_modelos():
     assert ev(rtf=2)["semaforo"] == "verde"
     assert ev(rtf=2, gated=True)["semaforo"] == "amarillo"
     assert ev(rtf=20)["semaforo"] == "amarillo"      # 10 min
-    assert ev(rtf=60)["semaforo"] == "rojo"          # 30 min
+    assert ev(rtf=70)["semaforo"] == "rojo"          # 35 min
     assert ev(comercial=False)["semaforo"] == "rojo"
     assert ev(clona=False)["semaforo"] == "rojo"
     assert ev(rtf=2)["min_clip"] == 1.0

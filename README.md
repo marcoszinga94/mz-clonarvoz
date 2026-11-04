@@ -75,6 +75,12 @@ En Ajustes se elige con qué motor generar; no se sustituye uno por otro:
 | **Chatterbox** (default) | 23 idiomas + packs es | `exag` / `cfg` | ~27× tiempo real |
 | **OpenVoice V2** | español | no aplica | **~1,7× tiempo real** |
 | **Qwen3-TTS 0.6B** | 10 idiomas | 3 s | **~15× tiempo real** |
+| **Qwen3-TTS 1.7B** | 10 idiomas | 3 s | ~42× (estimado) |
+| **VoxCPM2** | 30 idiomas | 5 s | **~49× tiempo real** (48 kHz) |
+
+**VoxCPM2** (Apache-2.0) dio la mejor similitud medida (0,933 contra 0,86 de
+Chatterbox con la misma toma) y salida a 48 kHz, pero cuesta ~25 minutos por
+clip de 30 s. Se instala solo desde el catálogo ("Descargar").
 
 **Qwen3-TTS 0.6B** (Apache-2.0) es el que mejor similitud da en las pruebas
 (0,89–0,91 contra 0,86 de Chatterbox con la misma toma), a costa de ~15× tiempo

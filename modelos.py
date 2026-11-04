@@ -35,7 +35,7 @@ CATALOGO = [
     {
         "id": "voxcpm2", "nombre": "VoxCPM2", "version": "0.5B",
         "params": "0,5B", "gb": 5.0, "licencia": "Apache-2.0", "comercial": True,
-        "idiomas": "30", "clona": True, "rtf": 14, "medido": False,
+        "idiomas": "30", "clona": True, "rtf": 49, "medido": True,
         "repo": "openbmb/VoxCPM2", "instalable": "auto",
     },
     {
@@ -66,7 +66,7 @@ def evaluar(modelo: dict, instalados: set[str]) -> dict:
         m["semaforo"], m["motivo"] = "amarillo", "licencia propia: revisar antes de monetizar"
     elif not modelo["comercial"]:
         m["semaforo"], m["motivo"] = "rojo", "licencia no comercial"
-    elif minutos > 20:
+    elif minutos > 30:
         m["semaforo"], m["motivo"] = "rojo", f"~{minutos:.0f} min por clip de 30 s"
     elif modelo.get("gated"):
         m["semaforo"], m["motivo"] = "amarillo", "requiere cuenta de Hugging Face"
