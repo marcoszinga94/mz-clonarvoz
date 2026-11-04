@@ -268,6 +268,8 @@ async function empezarGrabacion() {
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Sin resume() el contexto queda suspendido y el analizador devuelve ceros.
+    await audioCtx.resume().catch(() => {});
     const fuente = audioCtx.createMediaStreamSource(stream);
     const analizador = audioCtx.createAnalyser();
     analizador.fftSize = 2048;
@@ -275,7 +277,7 @@ async function empezarGrabacion() {
     const g = {
       stream, media: null, chunks: [], t0: null, iv: null, grabando: false,
       audioCtx, analizador, buffer: new Float32Array(analizador.fftSize),
-      ruido: null, pico: -99,
+      ruido: null, pico: -99, silencio: 0,
     };
     estado.grabando = g;
 
@@ -313,6 +315,47 @@ function comenzarCaptura() {
   $("#modal-tiempo").textContent = "0:00";
   $("#modal-pista").textContent = "Grabando. Podés seguir hablando: se usa la toma completa (hasta 60 s).";
   $("#btn-detener").textContent = "Detener y guardar";
+}
+
+function leerNivel(g) {
+  if (g.audioCtx && g.audioCtx.state === "suspended") {
+    g.audioCtx.resume().catch(() => {});
+  }
+  g.analizador.getFloatTimeDomainData(g.buffer);
+  let suma = 0, pico = 0;
+  for (const v of g.buffer) {
+    suma += v * v;
+    const a = Math.abs(v);
+    if (a > pico) pico = a;
+  }
+  const rms = Math.sqrt(suma / g.buffer.length);
+  const db = 20 * Math.log10(rms + 1e-9);
+  g.pico = Math.max(g.pico, db);
+  if (db > -70 && (g.ruido === null || db < g.ruido)) g.ruido = db;
+
+  const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+  const barra = $("#nivel-fill");
+  barra.style.width = `${pct}%`;
+  barra.classList.toggle("alto", db > -6);
+  barra.classList.toggle("bajo", db < -45 && db > -70);
+
+  $("#nivel-db").textContent = db <= -70 ? "silencio" : `${db.toFixed(0)} dB`;
+
+  const est = $("#nivel-estado");
+  let clase = "bien", texto = "Bien";
+  if (db > -6) { clase = "alto"; texto = "Saturando"; }
+  else if (db < -45) { clase = "bajo"; texto = "Muy bajo"; }
+
+  // Si no llega nada durante ~2 s, conviene decirlo en vez de "silencio".
+  g.silencio = db <= -70 ? (g.silencio || 0) + 1 : 0;
+  if (!g.grabando && g.silencio > 20) { clase = "bajo"; texto = "Sin señal"; }
+
+  est.className = `nivel-estado ${clase}`;
+  est.textContent = texto;
+
+  if (g.ruido !== null && g.pico > g.ruido + 4) {
+    $("#nivel-snr").textContent = `SNR ~${Math.round(g.pico - g.ruido)} dB`;
+  }
 }
 
 function detenerGrabacion() {
