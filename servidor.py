@@ -77,7 +77,7 @@ def cargar_ajustes() -> dict:
 
 def guardar_ajustes(datos: dict) -> dict:
     actual = cargar_ajustes()
-    if datos.get("motor") in ("chatterbox", "openvoice"):
+    if datos.get("motor") in MOTORES_DISPONIBLES:
         actual["motor"] = datos["motor"]
     if datos.get("fidelidad") in (1, 2, 3, 4):
         actual["fidelidad"] = int(datos["fidelidad"])
