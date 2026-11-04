@@ -224,6 +224,31 @@ function pintarRefs(refs) {
   pintarRefAudio();
 }
 
+function cerrarSelectorVoz() {
+  $("#voz-select-lista").hidden = true;
+  $("#voz-select-btn").setAttribute("aria-expanded", "false");
+}
+
+function pintarSelectorVoz() {
+  const sel = $("#select-voz");
+  const refs = estado.refs || [];
+  const actual = refs.find((r) => r.nombre === sel.value);
+
+  $("#voz-select-txt").textContent = actual
+    ? `${bonito(actual.nombre)} · ${fmt(actual.dur)}`
+      + (actual.nota != null ? ` · ${actual.nota.toFixed(2)}` : "")
+    : "Grabá o subí tu voz";
+  $("#voz-select-fecha").textContent = actual && actual.mtime ? fechaHora(actual.mtime) : "";
+  $("#voz-select-btn").disabled = !refs.length;
+
+  $("#voz-select-lista").innerHTML = refs.map((r) => `
+    <button type="button" class="voz-opcion${r.nombre === sel.value ? " activa" : ""}"
+            data-ref="${esc(r.nombre)}" role="option" aria-selected="${r.nombre === sel.value}">
+      <span class="voz-opcion-txt">${esc(bonito(r.nombre))} · ${fmt(r.dur)}${r.nota != null ? ` · ${r.nota.toFixed(2)}` : ""}</span>
+      <span class="voz-opcion-fecha mono">${r.mtime ? esc(fechaHora(r.mtime)) : ""}</span>
+    </button>`).join("");
+}
+
 function pintarRefAudio() {
   const nombre = $("#select-voz").value;
   const ref = estado.refs.find((r) => r.nombre === nombre);
@@ -235,6 +260,7 @@ function pintarRefAudio() {
     $("#btn-calibrar").hidden = true;
     $("#btn-borrar-toma").hidden = true;
     $("#ref-veredicto").hidden = true;
+    pintarSelectorVoz();
     return;
   }
   audio.hidden = false;
@@ -247,6 +273,7 @@ function pintarRefAudio() {
   $("#btn-borrar-toma").hidden = false;
   $("#btn-evaluar").hidden = estado.refs.length < 2;
   pintarAnalisis(ref.analisis);
+  pintarSelectorVoz();
 }
 
 function pintarAnalisis(a) {
@@ -1155,6 +1182,28 @@ $("#file").addEventListener("change", async (ev) => {
 });
 
 $("#select-voz").addEventListener("change", () => { pintarRefAudio(); guardarAjustes(); });
+
+$("#voz-select-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ($("#voz-select-btn").disabled) return;
+  const lista = $("#voz-select-lista");
+  const abrir = lista.hidden;
+  lista.hidden = !abrir;
+  $("#voz-select-btn").setAttribute("aria-expanded", String(abrir));
+});
+
+$("#voz-select-lista").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ref]");
+  if (!b) return;
+  const sel = $("#select-voz");
+  sel.value = b.dataset.ref;
+  sel.dispatchEvent(new Event("change"));
+  cerrarSelectorVoz();
+});
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#voz-select")) cerrarSelectorVoz();
+});
 $("#motor").addEventListener("change", () => { aplicarMotor(); guardarAjustes(); });
 $("#fidelidad").addEventListener("change", guardarAjustes);
 $("#guion").addEventListener("input", actualizarContador);
@@ -1250,6 +1299,7 @@ document.addEventListener("keydown", (e) => {
     generar();
   }
   if (e.key === "Escape") {
+    cerrarSelectorVoz();
     if (estado.grabando) cancelarGrabacion();
     else if (!$("#modal-guion").hidden) cerrarGuion();
   }

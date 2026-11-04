@@ -35,7 +35,16 @@
     <div class="voz-fila">
       <div class="voz-info">
         <label class="sr" for="select-voz">Clip de referencia</label>
-        <select id="select-voz"></select>
+        <div class="voz-select" id="voz-select">
+          <button class="voz-select-btn" id="voz-select-btn" type="button"
+                  aria-haspopup="listbox" aria-expanded="false">
+            <span class="voz-select-txt" id="voz-select-txt">Grabá o subí tu voz</span>
+            <span class="voz-select-fecha mono" id="voz-select-fecha"></span>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="voz-select-lista" id="voz-select-lista" role="listbox" hidden></div>
+          <select id="select-voz" class="sr" tabindex="-1" aria-hidden="true"></select>
+        </div>
       </div>
 
       <div class="voz-acciones">
