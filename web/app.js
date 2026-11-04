@@ -75,7 +75,7 @@ const MOTOR_TEXTO = {
   openvoice: "OpenVoice V2: clona el timbre. Más rápido, solo español.",
   qwen: "Qwen3-TTS: la mejor similitud medida. El más lento (≈15× tiempo real).",
 };
-const OPCIONALES = { openvoice: "OpenVoice V2 (español)", qwen: "Qwen3-TTS 0.6B (español)" };
+const OPCIONALES = { openvoice: "OpenVoice V2 · MeloTTS", qwen: "Qwen3-TTS · 0.6B" };
 
 function pintarMotores() {
   const sel = $("#motor");
@@ -745,6 +745,30 @@ function seguirCalibracion(jobId) {
   estado.polling = setTimeout(tick, 600);
 }
 
+// --------------------------------------------------------------- modelos
+
+async function abrirModelos() {
+  $("#modal-modelos").hidden = false;
+  $("#lista-modelos").innerHTML = '<p class="pista">Cargando…</p>';
+  try {
+    const r = await api("/api/modelos");
+    $("#lista-modelos").innerHTML = r.modelos.map((m) => {
+      const estado = m.instalado ? "Instalado" : (m.gated ? "Requiere HF" : "Descargable");
+      return `<div class="modelo" data-semaforo="${m.semaforo}">
+        <div class="modelo-h">
+          <span class="semaforo" aria-hidden="true"></span>
+          <span class="modelo-n">${esc(m.nombre)} <span class="modelo-v">${esc(m.version)}</span></span>
+          <span class="modelo-estado" data-inst="${m.instalado ? "si" : "no"}">${estado}</span>
+        </div>
+        <div class="modelo-meta">${esc(m.params)} · ${String(m.gb).replace(".", ",")} GB · ${esc(m.licencia)} · ${esc(m.idiomas)} idiomas</div>
+        <div class="modelo-meta">${esc(m.motivo)}${m.medido ? " · medido" : " · estimado"}</div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    $("#lista-modelos").innerHTML = `<p class="error">${esc(String(e.message))}</p>`;
+  }
+}
+
 // --------------------------------------------------------------- borrar toma
 
 async function borrarToma() {
@@ -965,6 +989,11 @@ $("#btn-cancelar-job").addEventListener("click", async () => {
   }
 });
 
+$("#btn-modelos").addEventListener("click", abrirModelos);
+$("#mm-cerrar").addEventListener("click", () => { $("#modal-modelos").hidden = true; $("#btn-modelos").focus(); });
+$("#modal-modelos").addEventListener("click", (e) => {
+  if (e.target.id === "modal-modelos") $("#modal-modelos").hidden = true;
+});
 $("#btn-calibrar").addEventListener("click", calibrar);
 $("#btn-borrar-toma").addEventListener("click", borrarToma);
 $("#btn-evaluar").addEventListener("click", evaluarTomas);

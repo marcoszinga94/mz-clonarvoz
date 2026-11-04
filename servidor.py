@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 import guiones
 import motor_openvoice
 import motor_qwen
+import modelos
 import voz
 
 ROOT = Path(__file__).resolve().parent
@@ -787,6 +788,12 @@ def borrar_ref(nombre: str) -> dict:
 @app.get("/api/historial")
 def api_historial() -> dict:
     return {"clips": historial()}
+
+
+@app.get("/api/modelos")
+def api_modelos() -> dict:
+    instalados = {n for n, listo in MOTORES_DISPONIBLES.items() if listo()}
+    return {"modelos": [modelos.evaluar(m, instalados) for m in modelos.CATALOGO]}
 
 
 @app.get("/api/ajustes")

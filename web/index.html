@@ -74,9 +74,9 @@
       <div class="campo">
         <label for="motor">Motor</label>
         <select id="motor" class="select-sm">
-          <option value="chatterbox" selected>Chatterbox</option>
-          <option value="openvoice">OpenVoice V2</option>
-          <option value="qwen">Qwen3-TTS 0.6B (español)</option>
+          <option value="chatterbox" selected>Chatterbox · V3</option>
+          <option value="openvoice">OpenVoice V2 · MeloTTS</option>
+          <option value="qwen">Qwen3-TTS · 0.6B</option>
         </select>
         <p class="pista" id="motor-nota">Chatterbox: clona timbre y ritmo. Más lento, más parecido.</p>
       </div>
@@ -90,6 +90,8 @@
         </select>
         <p class="pista" id="fidelidad-nota">Genera varias tomas de cada frase y se queda la más parecida a tu voz.</p>
       </div>
+
+      <button class="link link-accion" id="btn-modelos" type="button">Ver todos los modelos</button>
 
       <p class="nota">El resultado usa la voz de la referencia como única fuente. Los ajustes de expresividad, pausas y acento se toman automáticamente del análisis de tu toma.</p>
     </section>
@@ -205,6 +207,16 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
       <button class="btn btn-primary" id="g-crear" type="button">Crear guion</button>
     </div>
     <button class="link" id="g-cancelar" type="button">Cancelar</button>
+  </div>
+</div>
+
+<div class="modal" id="modal-modelos" hidden role="dialog" aria-modal="true" aria-labelledby="mm-t">
+  <div class="modal-caja modal-ancho">
+    <h2 id="mm-t">Modelos de voz</h2>
+    <p class="sub">Tiempo estimado para un clip de 30 s en este equipo (6 núcleos, sin GPU).
+    Los medidos son reales; el resto se extrapola por tamaño.</p>
+    <div class="modelos" id="lista-modelos"></div>
+    <button class="link" id="mm-cerrar" type="button">Cerrar</button>
   </div>
 </div>
 

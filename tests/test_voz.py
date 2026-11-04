@@ -107,3 +107,24 @@ def test_analisis_marca_una_toma_corta(tmp_path):
     a = voz.analizar_referencia(p)
     assert a["veredicto"] == "malo"
     assert any("menos de 3" in aviso for aviso in a["avisos"])
+
+
+# ------------------------------------------------------------------- modelos
+
+def test_semaforo_modelos():
+    import modelos as cat
+
+    def ev(**kw):
+        base = {"id": "x", "nombre": "X", "version": "1", "params": "1B", "gb": 1,
+                "licencia": "MIT", "comercial": True, "idiomas": "1",
+                "clona": True, "rtf": 8, "medido": False, "repo": "r"}
+        base.update(kw)
+        return cat.evaluar(base, set())
+
+    assert ev(rtf=2)["semaforo"] == "verde"
+    assert ev(rtf=2, gated=True)["semaforo"] == "amarillo"
+    assert ev(rtf=20)["semaforo"] == "amarillo"      # 10 min
+    assert ev(rtf=60)["semaforo"] == "rojo"          # 30 min
+    assert ev(comercial=False)["semaforo"] == "rojo"
+    assert ev(clona=False)["semaforo"] == "rojo"
+    assert ev(rtf=2)["min_clip"] == 1.0

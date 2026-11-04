@@ -101,6 +101,9 @@ Si faltan, la opción aparece deshabilitada en la UI. Dependencias: `melotts`,
   mejor conserva el tono. Se guarda por toma y se aplica sola al elegirla.
 - **Borrar tomas**: elimina una referencia del disco (audio y metadatos). No
   deja borrar si hay una generación en curso con esa toma.
+- **Catálogo de modelos**: "Ver todos los modelos" lista versión, tamaño,
+  licencia y un semáforo de viabilidad en este equipo (verde corre bien,
+  amarillo lento o requiere cuenta, rojo no conviene).
 - **Evaluar tomas**: con varias grabaciones guardadas, mide cuál clona mejor
   (similitud + tono) y deja seleccionada la ganadora. La nota queda en el
   desplegable de voces.
