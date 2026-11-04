@@ -344,6 +344,7 @@ textarea:hover { border-color: #3d3d3d; }
   white-space: nowrap;
 }
 .clip-tag[data-motor="openvoice"] { color: var(--accent); border-color: #3a3f22; }
+.clip-tag[data-motor="qwen"] { color: #8ab4ff; border-color: rgba(138, 180, 255, 0.35); }
 .clip-m { font-size: 12px; line-height: 16px; color: var(--muted); margin-top: 2px; }
 .clip audio { grid-column: 1 / -1; width: 100%; height: 32px; }
 .clip-acc { display: flex; gap: 4px; align-items: center; }

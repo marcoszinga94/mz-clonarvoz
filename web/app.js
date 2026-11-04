@@ -67,6 +67,9 @@ async function cargarEstado() {
   cargarEstado._t = setTimeout(cargarEstado, estado.motor === "listo" ? 15000 : 2000);
 }
 
+const MOTOR_LABEL = { chatterbox: "Chatterbox", openvoice: "OpenVoice", qwen: "Qwen3-TTS" };
+const etiquetaMotor = (m) => MOTOR_LABEL[m] || MOTOR_LABEL.chatterbox;
+
 const MOTOR_TEXTO = {
   chatterbox: "Chatterbox: clona timbre y ritmo. Más lento, más parecido.",
   openvoice: "OpenVoice V2: clona el timbre. Más rápido, solo español.",
@@ -426,7 +429,7 @@ const COLA_ESTADOS = { en_cola: "En cola", generando: "Generando", listo: "Listo
 
 function plantillaCola(j) {
   const titulo = j.n_items === 1 ? "1 clip" : `${j.n_items} clips`;
-  const motor = j.motor === "openvoice" ? "OpenVoice" : "Chatterbox";
+  const motor = etiquetaMotor(j.motor);
   return `<div class="cola-item" data-estado="${j.estado}">
     <div class="cola-h">
       <span class="cola-t">${esc(titulo)}</span>
@@ -560,7 +563,7 @@ function filaBiblioteca(c) {
   const fecha = new Date(c.mtime * 1000);
   const cuando = fecha.toLocaleDateString("es", { day: "2-digit", month: "short" }) + " · " +
     fecha.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
-  const motor = c.motor === "openvoice" ? "OpenVoice" : "Chatterbox";
+  const motor = etiquetaMotor(c.motor);
   const variante = { argentina: "argentino", latam: "LatAm", espana: "España" }[c.variante] || "";
   return `<div class="clip">
     <div>
