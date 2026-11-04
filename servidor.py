@@ -759,6 +759,30 @@ def job(jid: str) -> dict:
     return {k: v for k, v in j.items() if k not in ("items", "ruta")}
 
 
+@app.delete("/api/ref/{nombre}")
+def borrar_ref(nombre: str) -> dict:
+    nombre = Path(nombre).name
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.wav", nombre):
+        raise HTTPException(400, "nombre inválido")
+    ruta = REFS / nombre
+    if not ruta.exists():
+        raise HTTPException(404, "toma no encontrada")
+
+    for j in TRABAJOS.values():
+        if j.get("estado") in ("en_cola", "generando") and j.get("ref") == nombre:
+            raise HTTPException(409, "hay una generación en curso con esta toma")
+
+    ruta.unlink()
+    ruta.with_suffix(".json").unlink(missing_ok=True)
+
+    ajustes = cargar_ajustes()
+    if ajustes.get("ref") == nombre:
+        ajustes["ref"] = None
+        _escribir_json(AJUSTES_FILE, ajustes)
+
+    return {"ok": True, "nombre": nombre}
+
+
 @app.get("/api/historial")
 def api_historial() -> dict:
     return {"clips": historial()}

@@ -211,6 +211,7 @@ function pintarRefAudio() {
     audio.hidden = true;
     $("#ref-dur").textContent = "";
     $("#btn-calibrar").hidden = true;
+    $("#btn-borrar-toma").hidden = true;
     $("#ref-veredicto").hidden = true;
     return;
   }
@@ -221,6 +222,7 @@ function pintarRefAudio() {
   if (audio.src !== url) audio.src = url;
   $("#ref-dur").textContent = fmt(ref.dur);
   $("#btn-calibrar").hidden = false;
+  $("#btn-borrar-toma").hidden = false;
   $("#btn-evaluar").hidden = estado.refs.length < 2;
   pintarAnalisis(ref.analisis);
 }
@@ -733,6 +735,27 @@ function seguirCalibracion(jobId) {
   estado.polling = setTimeout(tick, 600);
 }
 
+// --------------------------------------------------------------- borrar toma
+
+async function borrarToma() {
+  const nombre = $("#select-voz").value;
+  if (!nombre) return;
+  const etiqueta = bonito(nombre);
+  if (!confirm(`¿Borrar la toma "${etiqueta}"? Se elimina el audio del disco.`)) return;
+  $("#btn-borrar-toma").disabled = true;
+  try {
+    await api(`/api/ref/${encodeURIComponent(nombre)}`, { method: "DELETE" });
+    _refsFirma = "";                // fuerza repintado del selector
+    await cargarEstado();
+    if ($("#select-voz").value) await guardarAjustes();
+    toast(`Toma borrada: ${etiqueta}`);
+  } catch (e) {
+    toast(String(e.message), true);
+  } finally {
+    $("#btn-borrar-toma").disabled = false;
+  }
+}
+
 // --------------------------------------------------------------- evaluar tomas
 
 async function evaluarTomas() {
@@ -952,6 +975,7 @@ $("#btn-cancelar-job").addEventListener("click", async () => {
 });
 
 $("#btn-calibrar").addEventListener("click", calibrar);
+$("#btn-borrar-toma").addEventListener("click", borrarToma);
 $("#btn-evaluar").addEventListener("click", evaluarTomas);
 $("#btn-guion").addEventListener("click", abrirGuion);
 $("#btn-transcribir").addEventListener("click", () => $("#file-tx").click());

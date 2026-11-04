@@ -494,3 +494,6 @@ textarea:hover { border-color: #3d3d3d; }
 
 .link-accion { display: block; margin-top: 8px; color: var(--accent); font-weight: 600; }
 .link-accion:hover { color: #e4ff96; text-decoration: none; }
+
+.btn-peligro { color: var(--danger); }
+.btn-peligro:hover { background: rgba(255, 122, 107, 0.1); border-color: rgba(255, 122, 107, 0.45); }

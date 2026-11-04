@@ -94,6 +94,8 @@ Si faltan, la opción aparece deshabilitada en la UI. Dependencias: `melotts`,
   todo y no guarda nada (corta al terminar la frase en curso, ~15 s).
 - **Calibrar**: prueba tres expresividades sobre tu referencia y elige la que
   mejor conserva el tono. Se guarda por toma y se aplica sola al elegirla.
+- **Borrar tomas**: elimina una referencia del disco (audio y metadatos). No
+  deja borrar si hay una generación en curso con esa toma.
 - **Evaluar tomas**: con varias grabaciones guardadas, mide cuál clona mejor
   (similitud + tono) y deja seleccionada la ganadora. La nota queda en el
   desplegable de voces.
