@@ -318,38 +318,6 @@ def calibrar_openvoice(motor, ref: Path, lang: str = "es",
 
 
 # --------------------------------------------------------------------------- #
-# Video 9:16 con subtítulos quemados
-# --------------------------------------------------------------------------- #
-
-def exportar_video(mp3: Path, srt: Path | None, dst: Path,
-                   color: str = "0x0B0D05") -> dict:
-    mp3, dst = Path(mp3), Path(dst)
-    dur = probe_duration(mp3)
-    if dur <= 0:
-        raise RuntimeError("no pude leer la duración del audio")
-
-    vf = None
-    if srt and Path(srt).exists():
-        # Los valores de force_style van en el espacio del script (384x288),
-        # no en píxeles: FontSize 14 ≈ 93 px en un lienzo de 1080x1920.
-        estilo = ("FontName=DejaVu Sans,FontSize=14,PrimaryColour=&H00FFFFFF,"
-                  "OutlineColour=&H00121212,BorderStyle=1,Outline=2,Shadow=0,"
-                  "MarginL=5,MarginR=5,MarginV=70,Alignment=2")
-        vf = f"subtitles=filename='{Path(srt).as_posix()}':force_style='{estilo}'"
-
-    orden = ["-f", "lavfi", "-i", f"color=c={color}:s=1080x1920:r=30:d={dur:.3f}",
-             "-i", str(mp3)]
-    if vf:
-        orden += ["-vf", vf]
-    orden += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
-              "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-              "-movflags", "+faststart", "-shortest", str(dst)]
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg(orden)
-    return {"mp4": dst.name, "dur": round(dur, 2), "bytes": dst.stat().st_size}
-
-
-# --------------------------------------------------------------------------- #
 # Variedades de español
 # --------------------------------------------------------------------------- #
 

@@ -140,7 +140,6 @@ def historial() -> list[dict]:
             "titulo": meta.get("titulo") or p.stem,
             "mp3": f"/files/salida/{p.name}",
             "srt": f"/files/salida/{p.stem}.srt" if p.with_suffix(".srt").exists() else None,
-            "mp4": f"/files/salida/{p.stem}.mp4" if p.with_suffix(".mp4").exists() else None,
             "dur": round(duracion(p), 2),
             "motor": meta.get("motor") or "chatterbox",
             "variante": meta.get("variante") or "neutro",
@@ -638,24 +637,6 @@ def evaluar_refs(body: dict) -> dict:
     COLA.put(jid)
     guardar_cola()
     return {"job": jid}
-
-
-VIDEO_LOCK = threading.Lock()
-
-
-@app.post("/api/video")
-def api_video(body: dict) -> dict:
-    nombre = str(body.get("nombre", ""))
-    if not re.fullmatch(r"[a-z0-9-]+", nombre):
-        raise HTTPException(400, "nombre inválido")
-    mp3 = OUT / f"{nombre}.mp3"
-    if not mp3.exists():
-        raise HTTPException(404, "clip no encontrado")
-    srt = OUT / f"{nombre}.srt"
-    dst = OUT / f"{nombre}.mp4"
-    with VIDEO_LOCK:
-        info = voz.exportar_video(mp3, srt if srt.exists() else None, dst)
-    return {"nombre": nombre, "url": f"/files/salida/{dst.name}", "dur": info["dur"]}
 
 
 @app.post("/api/generar")

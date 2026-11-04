@@ -25,7 +25,6 @@ clips con su subtítulo y descargarlos. La CLI sigue disponible debajo.
 | Cómputo | **CPU** (6 hilos) | Tu GPU es una RX 580 (Polaris, gfx803): ROCm la dejó fuera de soporte y la Vega integrada (gfx90c) tampoco entra. Vulkan existe, pero ningún motor TTS serio lo aprovecha |
 | Runtime | **Python 3.11 en `.venv`** vía `uv` | El sistema tiene 3.14; torch, numba y compañía todavía no lo soportan. `--torch-backend=cpu` evita bajar 2.5 GB de wheels CUDA |
 | Audio | **ffmpeg** | Limpieza de referencia, loudness a −14 LUFS, MP3/AAC 48 kHz |
-| Video | **ffmpeg + libass** | MP4 1080x1920 con subtítulos quemados desde el SRT |
 | Guiones | **JSON versionado + manifiesto** | Cada clip es reproducible: mismo texto, misma semilla, mismo resultado |
 
 ### Rendimiento medido aquí
@@ -99,8 +98,6 @@ Si faltan, la opción aparece deshabilitada en la UI. Dependencias: `melotts`,
 - **Evaluar tomas**: con varias grabaciones guardadas, mide cuál clona mejor
   (similitud + tono) y deja seleccionada la ganadora. La nota queda en el
   desplegable de voces.
-- **Video 9:16**: desde la biblioteca, un clic convierte el MP3 y su SRT en un
-  MP4 vertical con los subtítulos quemados, listo para Reels o TikTok.
 - **Biblioteca**: reproductor, descarga del MP3 y del SRT, borrado.
 
 ### Variedades de español

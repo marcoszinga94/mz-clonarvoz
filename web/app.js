@@ -557,13 +557,6 @@ function filaBiblioteca(c) {
       <div class="clip-m mono">${fmt(c.dur)} · ${cuando}</div>
     </div>
     <div class="clip-acc">
-      ${c.mp4
-        ? `<a class="icon-btn" href="${c.mp4}" download title="Descargar video 9:16" aria-label="Descargar video 9:16">
-             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m11 10.5 3 1.5-3 1.5z"/></svg>
-           </a>`
-        : `<button class="icon-btn" data-video="${c.nombre}" title="Crear video 9:16" aria-label="Crear video 9:16">
-             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m11 10.5 3 1.5-3 1.5z"/></svg>
-           </button>`}
       <a class="icon-btn" href="${c.mp3}" download title="Descargar MP3" aria-label="Descargar MP3">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 18v1a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1"/></svg>
       </a>
@@ -939,27 +932,8 @@ $("#cola").addEventListener("click", async (e) => {
 
 $("#lista").addEventListener("click", (e) => {
   const b = e.target.closest("[data-borrar]");
-  if (b) { borrar(b.dataset.borrar); return; }
-  const v = e.target.closest("[data-video]");
-  if (v) crearVideo(v.dataset.video, v);
+  if (b) borrar(b.dataset.borrar);
 });
-
-async function crearVideo(nombre, boton) {
-  boton.disabled = true;
-  toast("Generando video 9:16…");
-  try {
-    const r = await api("/api/video", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombre }),
-    });
-    toast(`Video listo · ${fmt(r.dur)}`);
-    cargarBiblioteca();
-  } catch (e) {
-    toast(String(e.message), true);
-    boton.disabled = false;
-  }
-}
 
 $("#btn-cancelar-job").addEventListener("click", async () => {
   const id = estado.jobActual;
