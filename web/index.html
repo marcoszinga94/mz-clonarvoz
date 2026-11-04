@@ -234,9 +234,9 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
 
 <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-t">
   <div class="modal-caja">
-    <h2 id="modal-t">Grabando</h2>
+    <h2 id="modal-t">Micrófono listo</h2>
     <p class="modal-frase">Mira, esto es algo que aprendí después de mucho prueba y error. No hace falta tener un estudio para sonar bien. Sigue hablando hasta que te sientas cómodo.</p>
-    <p class="pista">Sin límite de tiempo. Cuanto más hables, más estable sale el timbre.</p>
+    <p class="pista" id="modal-pista">Hablá para probar el nivel. Ajustá el micrófono y, cuando estés conforme, tocá Comenzar.</p>
     <div class="nivel">
       <div class="nivel-barra"><span id="nivel-fill"></span></div>
       <div class="nivel-info">
@@ -246,7 +246,7 @@ Una línea por clip. Los puntos y las comas marcan las pausas."></textarea>
       </div>
     </div>
     <p class="mono modal-tiempo" id="modal-tiempo">0:00</p>
-    <button class="btn btn-primary btn-ancho" id="btn-detener" type="button">Detener y guardar</button>
+    <button class="btn btn-primary btn-ancho" id="btn-detener" type="button">Comenzar a grabar</button>
     <button class="link" id="btn-cancelar" type="button">Cancelar</button>
   </div>
 </div>

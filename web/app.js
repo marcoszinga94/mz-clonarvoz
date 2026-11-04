@@ -267,84 +267,71 @@ async function empezarGrabacion() {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus" : "";
-    const media = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : undefined);
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const fuente = audioCtx.createMediaStreamSource(stream);
     const analizador = audioCtx.createAnalyser();
     analizador.fftSize = 2048;
     fuente.connect(analizador);
     const g = {
-      stream, media, chunks: [], t0: performance.now(), iv: null,
+      stream, media: null, chunks: [], t0: null, iv: null, grabando: false,
       audioCtx, analizador, buffer: new Float32Array(analizador.fftSize),
       ruido: null, pico: -99,
     };
     estado.grabando = g;
 
-    media.ondataavailable = (ev) => { if (ev.data.size) g.chunks.push(ev.data); };
-    media.onstop = () => finalizarGrabacion(g);
-    media.start(250);
+    // El medidor corre desde el principio: sirve para calibrar antes de grabar.
+    g.iv = setInterval(() => {
+      leerNivel(g);
+      if (!g.grabando || !g.t0) return;
+      const s = (performance.now() - g.t0) / 1000;
+      $("#modal-tiempo").textContent = s > 60 ? `${fmt(s)} · ya alcanza` : fmt(s);
+    }, 100);
 
     $("#modal").hidden = false;
+    $("#modal-t").textContent = "Micrófono listo";
     $("#modal-tiempo").textContent = "0:00";
-    g.iv = setInterval(() => {
-      const s = (performance.now() - g.t0) / 1000;
-      $("#modal-tiempo").textContent = fmt(s);
-      leerNivel(g);
-      if (s > 60) $("#modal-tiempo").textContent = `${fmt(s)} · ya alcanza`;
-    }, 100);
+    $("#modal-pista").textContent = "Hablá para probar el nivel. Ajustá el micrófono y, cuando estés conforme, tocá Comenzar.";
+    $("#btn-detener").textContent = "Comenzar a grabar";
   } catch (err) {
     toast("No pude abrir el micrófono: " + err.message, true);
   }
 }
 
-function leerNivel(g) {
-  g.analizador.getFloatTimeDomainData(g.buffer);
-  let suma = 0, pico = 0;
-  for (const v of g.buffer) {
-    suma += v * v;
-    const a = Math.abs(v);
-    if (a > pico) pico = a;
-  }
-  const rms = Math.sqrt(suma / g.buffer.length);
-  const db = 20 * Math.log10(rms + 1e-9);
-  g.pico = Math.max(g.pico, db);
-  if (db > -70 && (g.ruido === null || db < g.ruido)) g.ruido = db;
-
-  const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
-  const barra = $("#nivel-fill");
-  barra.style.width = `${pct}%`;
-  barra.classList.toggle("alto", db > -6);
-  barra.classList.toggle("bajo", db < -45 && db > -70);
-
-  $("#nivel-db").textContent = db <= -70 ? "silencio" : `${db.toFixed(0)} dB`;
-
-  const est = $("#nivel-estado");
-  let clase = "bien", texto = "Bien";
-  if (db > -6) { clase = "alto"; texto = "Saturando"; }
-  else if (db < -45) { clase = "bajo"; texto = "Muy bajo"; }
-  est.className = `nivel-estado ${clase}`;
-  est.textContent = texto;
-
-  if (g.ruido !== null && g.pico > g.ruido + 4) {
-    $("#nivel-snr").textContent = `SNR ~${Math.round(g.pico - g.ruido)} dB`;
-  }
+function comenzarCaptura() {
+  const g = estado.grabando;
+  if (!g || g.grabando) return;
+  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+    ? "audio/webm;codecs=opus" : "";
+  g.media = new MediaRecorder(g.stream, mime
+    ? { mimeType: mime, audioBitsPerSecond: 128000 } : undefined);
+  g.media.ondataavailable = (ev) => { if (ev.data.size) g.chunks.push(ev.data); };
+  g.media.onstop = () => finalizarGrabacion(g);
+  g.media.start(250);
+  g.grabando = true;
+  g.t0 = performance.now();
+  $("#modal-t").textContent = "Grabando";
+  $("#modal-tiempo").textContent = "0:00";
+  $("#modal-pista").textContent = "Grabando. Podés seguir hablando: se usa la toma completa (hasta 60 s).";
+  $("#btn-detener").textContent = "Detener y guardar";
 }
 
 function detenerGrabacion() {
   const g = estado.grabando;
-  if (!g || g.media.state === "inactive") return;
+  if (!g) return;
+  if (!g.grabando) { comenzarCaptura(); return; }
   clearInterval(g.iv);
-  g.media.stop();
+  g.grabando = false;
+  if (g.media && g.media.state !== "inactive") g.media.stop();
 }
 
 function cancelarGrabacion() {
   const g = estado.grabando;
   if (!g) return;
   clearInterval(g.iv);
-  g.media.onstop = null;
-  if (g.media.state !== "inactive") g.media.stop();
+  if (g.media) {
+    g.media.onstop = null;
+    if (g.media.state !== "inactive") g.media.stop();
+  }
   if (g.audioCtx) g.audioCtx.close().catch(() => {});
   g.stream.getTracks().forEach((t) => t.stop());
   estado.grabando = null;

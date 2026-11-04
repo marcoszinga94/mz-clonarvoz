@@ -50,8 +50,9 @@ un lote de 10 posts se hace en ~50 min (déjalo corriendo de noche).
 `./app` levanta un servidor en `127.0.0.1:8000` y abre el navegador. Nada sale de
 tu equipo: ni el audio, ni el texto, ni las peticiones.
 
-- **Grabación guiada**: vúmetro en vivo, nivel en dB, aviso de "muy bajo" o
-  "saturando", SNR estimada y evaluación automática al terminar.
+- **Grabación guiada**: al abrir el micrófono no graba: muestra el vúmetro en
+  vivo para calibrar y espera a que toques **Comenzar**. Avisa "muy bajo" o
+  "saturando", estima la SNR y evalúa la toma automáticamente al terminar.
 - **Comparar motores**: genera la misma frase con cada motor instalado y mide
   similitud, tono y tiempo con el mismo medidor.
 - **Voz**: graba sin límite desde el navegador (MediaRecorder), sube un archivo o
