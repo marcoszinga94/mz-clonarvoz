@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 import guiones
 import motor_openvoice
+import motor_qwen
 import voz
 
 ROOT = Path(__file__).resolve().parent
@@ -209,6 +210,7 @@ MOTORES: "OrderedDict[str, object]" = OrderedDict()
 MOTORES_DISPONIBLES = {
     "chatterbox": lambda: True,
     "openvoice": lambda: motor_openvoice.disponible(),
+    "qwen": lambda: motor_qwen.disponible(),
 }
 
 
@@ -225,7 +227,13 @@ def obtener_motor(variante: str, nombre: str = "chatterbox"):
     if nombre not in MOTORES_DISPONIBLES:
         raise ValueError(f"motor desconocido: {nombre}")
 
-    if nombre == "openvoice":
+    if nombre == "qwen":
+        clave = "qwen:es"
+        if clave in MOTORES:
+            MOTORES.move_to_end(clave)
+            return MOTORES[clave]
+        motor = motor_qwen.MotorQwen(HILOS)
+    elif nombre == "openvoice":
         clave = "openvoice:es"      # MeloTTS solo tiene español instalado
         if clave in MOTORES:
             MOTORES.move_to_end(clave)
@@ -301,12 +309,21 @@ def _procesar(job: dict) -> None:
     variante = job.get("variante", "neutro")
     motor_nombre = job.get("motor", "chatterbox")
     # Cargar un modelo tarda ~1 min: se informa en vez de dejar el trabajo "en cola".
-    clave = "openvoice:es" if motor_nombre == "openvoice" else f"chatterbox:{clave_motor(variante)}"
+    if motor_nombre == "openvoice":
+        clave = "openvoice:es"
+    elif motor_nombre == "qwen":
+        clave = "qwen:es"
+    else:
+        clave = f"chatterbox:{clave_motor(variante)}"
     if clave not in MOTORES:
         job["estado"] = "generando"
-        job["detalle"] = ("cargando OpenVoice (solo la primera vez)"
-                          if motor_nombre == "openvoice"
-                          else "cargando el pack de español (solo la primera vez)")
+        job["detalle"] = (
+            "cargando Qwen3-TTS (la primera vez tarda ~1 min)"
+            if motor_nombre == "qwen"
+            else "cargando OpenVoice (solo la primera vez)"
+            if motor_nombre == "openvoice"
+            else "cargando el pack de español (solo la primera vez)"
+        )
     motor = obtener_motor(variante, motor_nombre)
     job["estado"] = "generando"
 

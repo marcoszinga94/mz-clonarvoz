@@ -74,6 +74,12 @@ En Ajustes se elige con qué motor generar; no se sustituye uno por otro:
 |---|---|---|---|
 | **Chatterbox** (default) | 23 idiomas + packs es | `exag` / `cfg` | ~27× tiempo real |
 | **OpenVoice V2** | español | no aplica | **~1,7× tiempo real** |
+| **Qwen3-TTS 0.6B** | 10 idiomas | 3 s | **~15× tiempo real** |
+
+**Qwen3-TTS 0.6B** (Apache-2.0) es el que mejor similitud da en las pruebas
+(0,89–0,91 contra 0,86 de Chatterbox con la misma toma), a costa de ~15× tiempo
+real: un clip de 30 s tarda unos 7 minutos. Corre en `.venv-qwen` y se comunica
+por un worker (`motores/qwen_worker.py`), así no comparte dependencias.
 
 OpenVoice V2 combina **MeloTTS** (texto → voz) con su **conversor de timbre**:
 la prosodia sale de MeloTTS y el timbre de tu referencia. Es mucho más rápido en

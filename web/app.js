@@ -70,21 +70,26 @@ async function cargarEstado() {
 const MOTOR_TEXTO = {
   chatterbox: "Chatterbox: clona timbre y ritmo. Más lento, más parecido.",
   openvoice: "OpenVoice V2: clona el timbre. Más rápido, solo español.",
+  qwen: "Qwen3-TTS: la mejor similitud medida. El más lento (≈15× tiempo real).",
 };
+const OPCIONALES = { openvoice: "OpenVoice V2 (español)", qwen: "Qwen3-TTS 0.6B (español)" };
 
 function pintarMotores() {
   const sel = $("#motor");
-  const op = sel.querySelector('option[value="openvoice"]');
-  const listo = Boolean(estado.motores && estado.motores.openvoice);
-  op.disabled = !listo;
-  op.textContent = listo ? "OpenVoice V2 (español)" : "OpenVoice V2 (no instalado)";
-  if (!listo && sel.value === "openvoice") sel.value = "chatterbox";
+  Object.entries(OPCIONALES).forEach(([clave, etiqueta]) => {
+    const op = sel.querySelector(`option[value="${clave}"]`);
+    if (!op) return;
+    const listo = Boolean(estado.motores && estado.motores[clave]);
+    op.disabled = !listo;
+    op.textContent = listo ? etiqueta : `${etiqueta.replace(" (español)", "")} (no instalado)`;
+    if (!listo && sel.value === clave) sel.value = "chatterbox";
+  });
   aplicarMotor();
 }
 
 function aplicarMotor() {
-  const ov = $("#motor").value === "openvoice";
-  $("#motor-nota").textContent = MOTOR_TEXTO[ov ? "openvoice" : "chatterbox"];
+  const motor = $("#motor").value;
+  $("#motor-nota").textContent = MOTOR_TEXTO[motor] || MOTOR_TEXTO.chatterbox;
 }
 
 function pintarMotor(e) {
