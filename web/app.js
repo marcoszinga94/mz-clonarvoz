@@ -15,6 +15,13 @@ const hora = (t) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+const fechaHora = (t) => {
+  const d = new Date(t * 1000);
+  const fecha = d.toLocaleDateString("es", { day: "2-digit", month: "short" })
+    .replace(".", "");
+  return `${fecha} · ${hora(t)}`;
+};
+
 const esc = (t) =>
   String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -197,7 +204,7 @@ function pintarRefs(refs) {
   } else {
     sel.disabled = false;
     refs.forEach((r) => {
-      const sello = r.mtime ? ` · ${hora(r.mtime)}` : "";
+      const sello = r.mtime ? ` · ${fechaHora(r.mtime)}` : "";
       const nota = r.nota != null ? ` · ${r.nota.toFixed(2)}` : "";
       sel.append(new Option(`${bonito(r.nombre)} · ${fmt(r.dur)}${nota}${sello}`, r.nombre));
     });
