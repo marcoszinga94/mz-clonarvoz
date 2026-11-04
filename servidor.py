@@ -516,7 +516,10 @@ app = FastAPI(title="ClonarVoz", docs_url=None, redoc_url=None)
 async def sin_cache_ui(request, call_next):
     """La UI se revalida siempre: si no, un cambio de JS queda cacheado."""
     respuesta = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/web/"):
+    ruta = request.url.path
+    if ruta.startswith("/api/"):
+        respuesta.headers["Cache-Control"] = "no-store"
+    elif ruta == "/" or ruta.startswith("/web/"):
         respuesta.headers["Cache-Control"] = "no-cache, must-revalidate"
     return respuesta
 

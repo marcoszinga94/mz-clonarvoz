@@ -439,9 +439,14 @@ async function refrescarCola() {
   clearTimeout(estado.colaTimer);
   try {
     const r = await api("/api/trabajos");
-    pintarCola(r.trabajos || []);
-    if ((r.trabajos || []).some((j) => j.estado === "en_cola" || j.estado === "generando")) {
+    const trabajos = r.trabajos || [];
+    pintarCola(trabajos);
+    const activos = trabajos.some((j) => j.estado === "en_cola" || j.estado === "generando");
+    if (activos) {
       estado.colaTimer = setTimeout(refrescarCola, 1500);
+    } else {
+      // Red de seguridad: al quedar la cola quieta, la biblioteca se relee.
+      cargarBiblioteca();
     }
   } catch (_) {
     estado.colaTimer = setTimeout(refrescarCola, 5000);
@@ -456,10 +461,14 @@ function pintarCola(todos) {
   $("#cola-card").hidden = activos.length === 0;
 
   if (!activos.length) {
+    // Si veníamos siguiendo un trabajo, al terminar la cola queda vacía:
+    // hay que refrescar la biblioteca antes de salir o el clip no aparece.
+    const habiaTrabajo = Boolean(estado.stream.job || estado.colaDOM.size);
     cont.innerHTML = "";
     estado.colaDOM.clear();
     $("#cola-resumen").textContent = "";
     if (estado.stream.job) reiniciarStream();
+    if (habiaTrabajo) cargarBiblioteca();
     return;
   }
 
